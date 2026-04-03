@@ -4,5 +4,6 @@
 !dbuserid
 !dbon
 !dboff
-!dbhelp2
+!dbinfo
 !dbidlist
+
