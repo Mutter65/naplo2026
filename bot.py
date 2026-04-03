@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
 import requests
 from dotenv import load_dotenv
@@ -39,16 +39,33 @@ def load_txt(filename):
         pass
     return []
 
+# ---------- SEGÉD (ID + NÉV FELDOLGOZÁS) ----------
+def extract_id(line):
+    parts = line.split(maxsplit=1)
+    return parts[0] if parts else None
+
 # ---------- JOGOSULTSÁG ----------
 def is_server_allowed(guild_id):
-    return str(guild_id) in load_txt("serverid.txt")
+    lines = load_txt("serverid.txt")
+
+    for line in lines:
+        if extract_id(line) == str(guild_id):
+            return True
+
+    return False
+
 
 def is_user_allowed(member):
-    if str(member.id) in load_txt("userid.txt"):
-        return True
+    lines = load_txt("userid.txt")
+
+    for line in lines:
+        if extract_id(line) == str(member.id):
+            return True
+
     for role in member.roles:
         if role.name in load_txt("rangid.txt"):
             return True
+
     return False
 
 # ---------- BOT ----------
@@ -59,14 +76,13 @@ intents.guilds = True
 bot = commands.Bot(
     command_prefix="!",
     intents=intents,
-    case_insensitive=True  # 🔥 !N is működik
+    case_insensitive=True
 )
 
-# ---------- ERROR KEZELÉS ----------
+# ---------- ERROR DEBUG ----------
 @bot.event
 async def on_command_error(ctx, error):
-    if isinstance(error, commands.CommandNotFound):
-        return
+    print("HIBA:", error)
 
 # ---------- IDŐZÍTÉS ----------
 async def schedule_message(channel, send_time, message):
@@ -95,7 +111,6 @@ class NotificationModal(Modal, title="Értesítés"):
             if not channel:
                 return await interaction.response.send_message("❌ Nincs #üzenetek csatorna", ephemeral=True)
 
-            # mentés
             line = f"{interaction.guild.id}|{channel.id}|{dt.isoformat()}|{self.message.value}"
             save_to_memory(line)
 
@@ -117,12 +132,17 @@ class MenuView(View):
         await interaction.response.send_message("🛒 Bolt később", ephemeral=True)
 
 # ---------- PARANCSOK ----------
-
 @bot.command()
 async def n(ctx):
+    print("Guild:", ctx.guild.id)
+    print("User:", ctx.author.id)
+
     if not is_server_allowed(ctx.guild.id):
+        print("❌ SERVER NEM ENGEDÉLYEZETT")
         return
+
     if not is_user_allowed(ctx.author):
+        print("❌ USER NEM ENGEDÉLYEZETT")
         return
 
     await ctx.send("Válassz:", view=MenuView())
@@ -147,6 +167,13 @@ async def p(ctx):
     )
 
     await ctx.send(embed=embed)
+
+
+# ---------- TESZT PARANCS ----------
+@bot.command()
+async def test(ctx):
+    await ctx.send("✅ Működök!")
+
 
 # ---------- READY ----------
 @bot.event
