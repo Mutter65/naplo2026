@@ -16,10 +16,9 @@ if not DISCORD_TOKEN:
     raise ValueError("A DISCORD_TOKEN nincs beállítva!")
 
 GITHUB_BASE = "https://raw.githubusercontent.com/DarkyBotII/DarkyBotII/main/"
-
 MEMORY_FILE = "memory.txt"
 
-# ---------- FILE KEZELÉS ----------
+# ---------- FILE ----------
 def save_to_memory(line):
     with open(MEMORY_FILE, "a", encoding="utf-8") as f:
         f.write(line + "\n")
@@ -28,21 +27,17 @@ def load_memory():
     if not os.path.exists(MEMORY_FILE):
         return []
     with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-        return [line.strip() for line in f.readlines()]
+        return [line.strip() for line in f if line.strip()]
 
-# ---------- TXT BETÖLTÉS ----------
+# ---------- TXT ----------
 def load_txt(filename):
     try:
-        url = GITHUB_BASE + filename
-        response = requests.get(url)
-        if response.status_code == 200:
-            return [line.strip() for line in response.text.splitlines() if line.strip()]
-        return []
+        r = requests.get(GITHUB_BASE + filename)
+        if r.status_code == 200:
+            return [x.strip() for x in r.text.splitlines() if x.strip()]
     except:
-        return []
-
-def load_ban_txt(filename):
-    return load_txt(filename)
+        pass
+    return []
 
 # ---------- JOGOSULTSÁG ----------
 def is_server_allowed(guild_id):
@@ -61,7 +56,17 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(
+    command_prefix="!",
+    intents=intents,
+    case_insensitive=True  # 🔥 !N is működik
+)
+
+# ---------- ERROR KEZELÉS ----------
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        return
 
 # ---------- IDŐZÍTÉS ----------
 async def schedule_message(channel, send_time, message):
@@ -85,18 +90,18 @@ class NotificationModal(Modal, title="Értesítés"):
 
         try:
             dt = datetime.strptime(f"{self.date.value} {self.time.value}", "%Y-%m-%d %H:%M")
+
             channel = discord.utils.get(interaction.guild.text_channels, name="üzenetek")
-
             if not channel:
-                return await interaction.response.send_message("Nincs #üzenetek csatorna", ephemeral=True)
+                return await interaction.response.send_message("❌ Nincs #üzenetek csatorna", ephemeral=True)
 
-            # MENTÉS
+            # mentés
             line = f"{interaction.guild.id}|{channel.id}|{dt.isoformat()}|{self.message.value}"
             save_to_memory(line)
 
             asyncio.create_task(schedule_message(channel, dt, self.message.value))
 
-            await interaction.response.send_message("Mentve!", ephemeral=True)
+            await interaction.response.send_message("✅ Mentve!", ephemeral=True)
 
         except Exception as e:
             await interaction.response.send_message(f"Hiba: {e}", ephemeral=True)
@@ -109,9 +114,10 @@ class MenuView(View):
 
     @discord.ui.button(label="BOLT", style=discord.ButtonStyle.blurple)
     async def shop(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_message("Bolt később", ephemeral=True)
+        await interaction.response.send_message("🛒 Bolt később", ephemeral=True)
 
-# ---------- PARANCS ----------
+# ---------- PARANCSOK ----------
+
 @bot.command()
 async def n(ctx):
     if not is_server_allowed(ctx.guild.id):
@@ -120,6 +126,27 @@ async def n(ctx):
         return
 
     await ctx.send("Válassz:", view=MenuView())
+
+
+@bot.command()
+async def p(ctx):
+    if not is_server_allowed(ctx.guild.id):
+        return
+    if not is_user_allowed(ctx.author):
+        return
+
+    info_lines = load_txt("info.txt")
+
+    if not info_lines:
+        return await ctx.send("❌ info.txt nem található!")
+
+    embed = discord.Embed(
+        title="📘 Információ",
+        description="\n".join(info_lines),
+        color=discord.Color.blue()
+    )
+
+    await ctx.send(embed=embed)
 
 # ---------- READY ----------
 @bot.event
@@ -130,11 +157,13 @@ async def on_ready():
         try:
             guild_id, channel_id, time_str, msg = line.split("|", 3)
             channel = bot.get_channel(int(channel_id))
+
             if channel:
                 dt = datetime.fromisoformat(time_str)
                 asyncio.create_task(schedule_message(channel, dt, msg))
+
         except Exception as e:
-            print("Betöltési hiba:", e)
+            print("Hiba betöltés:", e)
 
 # ---------- WEBSERVER ----------
 app = Flask(__name__)
@@ -159,7 +188,12 @@ def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-Thread(target=run_web).start()
+def keep_alive():
+    t = Thread(target=run_web)
+    t.daemon = True
+    t.start()
+
+keep_alive()
 
 # ---------- RUN ----------
 bot.run(DISCORD_TOKEN)
