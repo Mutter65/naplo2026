@@ -13,7 +13,7 @@ load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 if not DISCORD_TOKEN:
-    raise ValueError("A DISCORD_TOKEN nincs beállítva!")
+    raise ValueError("❌ A DISCORD_TOKEN nincs beállítva!")
 
 GITHUB_BASE = "https://raw.githubusercontent.com/DarkyBotII/DarkyBotII/main/"
 MEMORY_FILE = "memory.txt"
@@ -32,14 +32,25 @@ def load_memory():
 # ---------- TXT ----------
 def load_txt(filename):
     try:
-        r = requests.get(GITHUB_BASE + filename)
+        url = GITHUB_BASE + filename
+        print("📥 LETÖLTÉS:", url)
+
+        r = requests.get(url)
+        print("📡 STATUS:", r.status_code)
+
         if r.status_code == 200:
-            return [x.strip() for x in r.text.splitlines() if x.strip()]
-    except:
-        pass
+            lines = [x.strip() for x in r.text.splitlines() if x.strip()]
+            print("📄 TARTALOM:", lines)
+            return lines
+        else:
+            print("❌ Nem sikerült betölteni:", filename)
+
+    except Exception as e:
+        print("❌ TXT HIBA:", e)
+
     return []
 
-# ---------- SEGÉD (ID + NÉV FELDOLGOZÁS) ----------
+# ---------- SEGÉD ----------
 def extract_id(line):
     parts = line.split(maxsplit=1)
     return parts[0] if parts else None
@@ -48,24 +59,34 @@ def extract_id(line):
 def is_server_allowed(guild_id):
     lines = load_txt("serverid.txt")
 
-    for line in lines:
-        if extract_id(line) == str(guild_id):
-            return True
+    if not lines:
+        print("❌ Üres serverid.txt")
+        return False
 
-    return False
-
+    allowed = str(guild_id) in [extract_id(x) for x in lines]
+    print(f"🔎 SERVER CHECK: {guild_id} -> {allowed}")
+    return allowed
 
 def is_user_allowed(member):
-    lines = load_txt("userid.txt")
+    user_ids = load_txt("userid.txt")
+    role_names = load_txt("rangid.txt")
 
-    for line in lines:
-        if extract_id(line) == str(member.id):
-            return True
+    print("👤 USER:", member.id)
+    print("🎭 USER ROLES:", [role.name for role in member.roles])
+    print("📄 TXT ROLES:", role_names)
 
+    # USER ID check
+    if str(member.id) in [extract_id(x) for x in user_ids]:
+        print("✅ USER ID MATCH")
+        return True
+
+    # ROLE check
     for role in member.roles:
-        if role.name in load_txt("rangid.txt"):
+        if role.name in role_names:
+            print("✅ ROLE MATCH:", role.name)
             return True
 
+    print("❌ USER NEM ENGEDÉLYEZETT")
     return False
 
 # ---------- BOT ----------
@@ -79,17 +100,35 @@ bot = commands.Bot(
     case_insensitive=True
 )
 
-# ---------- ERROR DEBUG ----------
+# ---------- DEBUG ----------
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    print(f"📩 Üzenet: {message.content} | {message.author}")
+    await bot.process_commands(message)
+
 @bot.event
 async def on_command_error(ctx, error):
-    print("HIBA:", error)
+    print("❌ HIBA:", error)
+    await ctx.send(f"❌ Hiba történt: {error}")
 
 # ---------- IDŐZÍTÉS ----------
 async def schedule_message(channel, send_time, message):
     delay = (send_time - datetime.utcnow()).total_seconds()
-    if delay > 0:
-        await asyncio.sleep(delay)
-    await channel.send(f"📢 Emlékeztető:\n{message}")
+
+    if delay <= 0:
+        print("⏰ Régi időpont, kihagyva")
+        return
+
+    print(f"⏳ Ütemezve: {delay} mp")
+    await asyncio.sleep(delay)
+
+    try:
+        await channel.send(f"📢 Emlékeztető:\n{message}")
+    except Exception as e:
+        print("❌ Küldési hiba:", e)
 
 # ---------- MODAL ----------
 class NotificationModal(Modal, title="Értesítés"):
@@ -99,17 +138,17 @@ class NotificationModal(Modal, title="Értesítés"):
 
     async def on_submit(self, interaction: discord.Interaction):
         if not is_server_allowed(interaction.guild.id):
-            return await interaction.response.send_message("Nincs engedély", ephemeral=True)
+            return await interaction.response.send_message("❌ Szerver nincs engedélyezve!", ephemeral=True)
 
         if not is_user_allowed(interaction.user):
-            return await interaction.response.send_message("Nincs jog", ephemeral=True)
+            return await interaction.response.send_message("❌ Nincs jogosultságod!", ephemeral=True)
 
         try:
             dt = datetime.strptime(f"{self.date.value} {self.time.value}", "%Y-%m-%d %H:%M")
 
             channel = discord.utils.get(interaction.guild.text_channels, name="üzenetek")
             if not channel:
-                return await interaction.response.send_message("❌ Nincs #üzenetek csatorna", ephemeral=True)
+                return await interaction.response.send_message("❌ Nincs #üzenetek csatorna!", ephemeral=True)
 
             line = f"{interaction.guild.id}|{channel.id}|{dt.isoformat()}|{self.message.value}"
             save_to_memory(line)
@@ -119,7 +158,7 @@ class NotificationModal(Modal, title="Értesítés"):
             await interaction.response.send_message("✅ Mentve!", ephemeral=True)
 
         except Exception as e:
-            await interaction.response.send_message(f"Hiba: {e}", ephemeral=True)
+            await interaction.response.send_message(f"❌ Hiba: {e}", ephemeral=True)
 
 # ---------- GOMBOK ----------
 class MenuView(View):
@@ -129,36 +168,26 @@ class MenuView(View):
 
     @discord.ui.button(label="BOLT", style=discord.ButtonStyle.blurple)
     async def shop(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_message("🛒 Bolt később", ephemeral=True)
+        await interaction.response.send_message("🛒 Bolt még nincs kész!", ephemeral=True)
 
 # ---------- PARANCSOK ----------
 @bot.command()
 async def n(ctx):
-    print("Guild:", ctx.guild.id)
-    print("User:", ctx.author.id)
-
     if not is_server_allowed(ctx.guild.id):
-        print("❌ SERVER NEM ENGEDÉLYEZETT")
-        return
+        return await ctx.send("❌ Ez a szerver nincs engedélyezve!")
 
     if not is_user_allowed(ctx.author):
-        print("❌ USER NEM ENGEDÉLYEZETT")
-        return
+        return await ctx.send("❌ Nincs jogosultságod!")
 
     await ctx.send("Válassz:", view=MenuView())
 
-
-@bot.command()
-async def p(ctx):
-    if not is_server_allowed(ctx.guild.id):
-        return
-    if not is_user_allowed(ctx.author):
-        return
-
+# ✅ SZABAD PARANCS (MINDENKINEK)
+@bot.command(name="dbinfo")
+async def dbinfo(ctx):
     info_lines = load_txt("info.txt")
 
     if not info_lines:
-        return await ctx.send("❌ info.txt nem található!")
+        return await ctx.send("❌ info.txt nem található vagy üres!")
 
     embed = discord.Embed(
         title="📘 Információ",
@@ -168,17 +197,14 @@ async def p(ctx):
 
     await ctx.send(embed=embed)
 
-
-# ---------- TESZT PARANCS ----------
 @bot.command()
 async def test(ctx):
     await ctx.send("✅ Működök!")
 
-
 # ---------- READY ----------
 @bot.event
 async def on_ready():
-    print("Bot elindult:", bot.user)
+    print("✅ Bot elindult:", bot.user)
 
     for line in load_memory():
         try:
@@ -190,7 +216,7 @@ async def on_ready():
                 asyncio.create_task(schedule_message(channel, dt, msg))
 
         except Exception as e:
-            print("Hiba betöltés:", e)
+            print("❌ Hiba betöltés:", e)
 
 # ---------- WEBSERVER ----------
 app = Flask(__name__)
@@ -202,6 +228,7 @@ def home():
 @app.route("/memory")
 def memory():
     key = request.args.get("key")
+
     if key != "titkos123":
         return "Tiltva", 403
 
@@ -224,4 +251,3 @@ keep_alive()
 
 # ---------- RUN ----------
 bot.run(DISCORD_TOKEN)
-
