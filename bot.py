@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import requests
 from dotenv import load_dotenv
@@ -33,18 +33,12 @@ def load_memory():
 def load_txt(filename):
     try:
         url = GITHUB_BASE + filename
-        print("📥 LETÖLTÉS:", url)
-
         r = requests.get(url)
-        print("📡 STATUS:", r.status_code)
 
         if r.status_code == 200:
             return [x.strip() for x in r.text.splitlines() if x.strip()]
-        else:
-            print("❌ Nem sikerült betölteni:", filename)
-
-    except Exception as e:
-        print("❌ TXT HIBA:", e)
+    except:
+        pass
 
     return []
 
@@ -54,24 +48,20 @@ def extract_ids_from_lines(lines):
 
 # ---------- JOGOSULTSÁG ----------
 def is_server_allowed(guild_id):
-    lines = load_txt("serverid.txt")
-    ids = extract_ids_from_lines(lines)
-    return str(guild_id) in ids
+    return str(guild_id) in extract_ids_from_lines(load_txt("serverid.txt"))
 
 def is_user_allowed(member):
     user_ids = extract_ids_from_lines(load_txt("userid.txt"))
-    role_names = load_txt("rangid.txt")
+    roles = load_txt("rangid.txt")
 
     if str(member.id) in user_ids:
         return True
 
-    return any(role.name in role_names for role in member.roles)
+    return any(r.name in roles for r in member.roles)
 
 # ---------- BOT ----------
 intents = discord.Intents.default()
 intents.message_content = True
-intents.guilds = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ---------- IDŐZÍTÉS ----------
@@ -79,8 +69,10 @@ async def schedule_message(channel, send_time, message):
     delay = (send_time - datetime.utcnow()).total_seconds()
 
     if delay <= 0:
+        print("⏰ Régi időpont")
         return
 
+    print(f"⏳ Ütemezve: {delay} mp")
     await asyncio.sleep(delay)
 
     embed = discord.Embed(
@@ -89,8 +81,11 @@ async def schedule_message(channel, send_time, message):
         color=discord.Color.yellow()
     )
 
-    embed.add_field(name="📅 Dátum", value=send_time.strftime("%Y.%m.%d"), inline=True)
-    embed.add_field(name="⏰ Idő", value=send_time.strftime("%H:%M"), inline=True)
+    # visszaalakítás magyar időre (+2 óra)
+    local_time = send_time + timedelta(hours=2)
+
+    embed.add_field(name="📅 Dátum", value=local_time.strftime("%Y.%m.%d"), inline=True)
+    embed.add_field(name="⏰ Idő", value=local_time.strftime("%H:%M"), inline=True)
     embed.set_footer(text="Falra tűzve 🧷")
 
     await channel.send(embed=embed)
@@ -109,8 +104,15 @@ class NotificationModal(Modal, title="Értesítés"):
         if not is_user_allowed(interaction.user):
             return await interaction.response.send_message("❌ Nincs jogosultságod!", ephemeral=True)
 
+        date_input = self.date.value.strip()
+        time_input = self.time.value.strip()
+
         try:
-            dt = datetime.strptime(f"{self.date.value} {self.time.value}", "%Y.%m.%d %H:%M")
+            dt = datetime.strptime(f"{date_input} {time_input}", "%Y.%m.%d %H:%M")
+
+            # magyar idő → UTC
+            dt = dt - timedelta(hours=2)
+
         except:
             return await interaction.response.send_message(
                 "❌ Hibás formátum!\n\n📅 Dátum: 2026.04.03\n⏰ Idő: 20:55",
@@ -119,40 +121,39 @@ class NotificationModal(Modal, title="Értesítés"):
 
         channel = interaction.channel
 
-        line = f"{interaction.guild.id}|{channel.id}|{dt.isoformat()}|{self.message.value}"
-        save_to_memory(line)
+        save_to_memory(f"{interaction.guild.id}|{channel.id}|{dt.isoformat()}|{self.message.value}")
 
         asyncio.create_task(schedule_message(channel, dt, self.message.value))
 
         await interaction.response.send_message("✅ Mentve!", ephemeral=True)
 
-# ---------- GOMBOK ----------
+# ---------- GOMB ----------
 class MenuView(View):
     @discord.ui.button(label="ÉRTESÍTÉS", style=discord.ButtonStyle.green)
     async def notify(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(NotificationModal())
 
-# ---------- PARANCS ----------
+# ---------- PARANCSOK ----------
 @bot.command()
 async def n(ctx):
     if not is_server_allowed(ctx.guild.id):
-        return await ctx.send("❌ Ez a szerver nincs engedélyezve!")
+        return await ctx.send("❌ Szerver tiltva!")
 
     if not is_user_allowed(ctx.author):
-        return await ctx.send("❌ Nincs jogosultságod!")
+        return await ctx.send("❌ Nincs jogosultság!")
 
     await ctx.send("Válassz:", view=MenuView())
 
 @bot.command()
 async def dbinfo(ctx):
-    info = load_txt("info.txt")
+    data = load_txt("info.txt")
 
-    if not info:
+    if not data:
         return await ctx.send("❌ info.txt nem található!")
 
     embed = discord.Embed(
         title="📘 Információ",
-        description="\n".join(info),
+        description="\n".join(data),
         color=discord.Color.blue()
     )
 
@@ -178,7 +179,7 @@ async def on_ready():
         except:
             pass
 
-# ---------- WEBSERVER ----------
+# ---------- WEB ----------
 app = Flask(__name__)
 
 @app.route("/")
@@ -196,10 +197,7 @@ def memory():
     with open(MEMORY_FILE, "r", encoding="utf-8") as f:
         return f"<pre>{f.read()}</pre>"
 
-def run_web():
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
-
-Thread(target=run_web, daemon=True).start()
+Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000))), daemon=True).start()
 
 # ---------- RUN ----------
 bot.run(DISCORD_TOKEN)
