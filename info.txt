@@ -1,9 +1,3 @@
-!darky
-!n
-!dbserverid
-!dbuserid
-!dbon
-!dboff
-!dbinfo
-!dbidlist
-
+!n        → értesítés létrehozása (ENGEDÉLYES)
+!dbinfo   → info megjelenítés (SZABAD)
+!test     → teszt (SZABAD)
