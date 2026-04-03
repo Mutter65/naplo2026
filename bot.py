@@ -15,7 +15,9 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 if not DISCORD_TOKEN:
     raise ValueError("❌ A DISCORD_TOKEN nincs beállítva!")
 
-GITHUB_BASE = "https://raw.githubusercontent.com/DarkyBotII/DarkyBotII/main/"
+# ✅ JAVÍTVA (helyes repo + nincs refs/heads)
+GITHUB_BASE = "https://raw.githubusercontent.com/Mutter65/naplo2026/main/"
+
 MEMORY_FILE = "memory.txt"
 
 # ---------- FILE ----------
@@ -50,9 +52,8 @@ def load_txt(filename):
 
     return []
 
-# ---------- ÚJ SEGÉD ----------
+# ---------- SEGÉD (PÁRATLAN SOROK = ID-k) ----------
 def extract_ids_from_lines(lines):
-    # páratlan indexű sorok (1, 3, 5...)
     return [lines[i] for i in range(1, len(lines), 2)]
 
 # ---------- JOGOSULTSÁG ----------
