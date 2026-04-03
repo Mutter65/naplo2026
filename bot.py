@@ -50,10 +50,10 @@ def load_txt(filename):
 
     return []
 
-# ---------- SEGÉD ----------
-def extract_id(line):
-    parts = line.split(maxsplit=1)
-    return parts[0] if parts else None
+# ---------- ÚJ SEGÉD ----------
+def extract_ids_from_lines(lines):
+    # páratlan indexű sorok (1, 3, 5...)
+    return [lines[i] for i in range(1, len(lines), 2)]
 
 # ---------- JOGOSULTSÁG ----------
 def is_server_allowed(guild_id):
@@ -63,20 +63,24 @@ def is_server_allowed(guild_id):
         print("❌ Üres serverid.txt")
         return False
 
-    allowed = str(guild_id) in [extract_id(x) for x in lines]
+    ids = extract_ids_from_lines(lines)
+
+    allowed = str(guild_id) in ids
     print(f"🔎 SERVER CHECK: {guild_id} -> {allowed}")
     return allowed
 
 def is_user_allowed(member):
-    user_ids = load_txt("userid.txt")
+    user_lines = load_txt("userid.txt")
     role_names = load_txt("rangid.txt")
+
+    user_ids = extract_ids_from_lines(user_lines)
 
     print("👤 USER:", member.id)
     print("🎭 USER ROLES:", [role.name for role in member.roles])
     print("📄 TXT ROLES:", role_names)
 
     # USER ID check
-    if str(member.id) in [extract_id(x) for x in user_ids]:
+    if str(member.id) in user_ids:
         print("✅ USER ID MATCH")
         return True
 
@@ -181,7 +185,6 @@ async def n(ctx):
 
     await ctx.send("Válassz:", view=MenuView())
 
-# ✅ SZABAD PARANCS (MINDENKINEK)
 @bot.command(name="dbinfo")
 async def dbinfo(ctx):
     info_lines = load_txt("info.txt")
