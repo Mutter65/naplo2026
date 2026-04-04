@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 from flask import Flask, request
 from threading import Thread
 import asyncio
-from discord.ui import View, Button, Modal, TextInput
 
 load_dotenv()
 
@@ -33,12 +32,12 @@ def load_memory():
 def load_txt(filename):
     try:
         url = GITHUB_BASE + filename
-        r = requests.get(url)
+        r = requests.get(url, timeout=10)
 
         if r.status_code == 200:
             return [x.strip() for x in r.text.splitlines() if x.strip()]
-    except:
-        pass
+    except Exception as e:
+        print("TXT hiba:", e)
 
     return []
 
@@ -69,10 +68,10 @@ async def schedule_message(channel, send_time, message):
     delay = (send_time - datetime.utcnow()).total_seconds()
 
     if delay <= 0:
-        print("⏰ Régi időpont")
-        return
+        delay = 1  # FIX: ne vesszen el sleep után
 
     print(f"⏳ Ütemezve: {delay} mp")
+
     await asyncio.sleep(delay)
 
     embed = discord.Embed(
@@ -81,7 +80,6 @@ async def schedule_message(channel, send_time, message):
         color=discord.Color.yellow()
     )
 
-    # visszaalakítás magyar időre (+2 óra)
     local_time = send_time + timedelta(hours=2)
 
     embed.add_field(name="📅 Dátum", value=local_time.strftime("%Y.%m.%d"), inline=True)
@@ -91,10 +89,10 @@ async def schedule_message(channel, send_time, message):
     await channel.send(embed=embed)
 
 # ---------- MODAL ----------
-class NotificationModal(Modal, title="Értesítés"):
-    date = TextInput(label="Dátum (YYYY.MM.DD)")
-    time = TextInput(label="Idő (HH:MM)")
-    message = TextInput(label="Üzenet", style=discord.TextStyle.long)
+class NotificationModal(discord.ui.Modal, title="Értesítés"):
+    date = discord.ui.TextInput(label="Dátum (YYYY.MM.DD)")
+    time = discord.ui.TextInput(label="Idő (HH:MM)")
+    message = discord.ui.TextInput(label="Üzenet", style=discord.TextStyle.long)
 
     async def on_submit(self, interaction: discord.Interaction):
 
@@ -104,18 +102,12 @@ class NotificationModal(Modal, title="Értesítés"):
         if not is_user_allowed(interaction.user):
             return await interaction.response.send_message("❌ Nincs jogosultságod!", ephemeral=True)
 
-        date_input = self.date.value.strip()
-        time_input = self.time.value.strip()
-
         try:
-            dt = datetime.strptime(f"{date_input} {time_input}", "%Y.%m.%d %H:%M")
-
-            # magyar idő → UTC
-            dt = dt - timedelta(hours=2)
-
+            dt = datetime.strptime(f"{self.date.value} {self.time.value}", "%Y.%m.%d %H:%M")
+            dt = dt - timedelta(hours=2)  # magyar → UTC
         except:
             return await interaction.response.send_message(
-                "❌ Hibás formátum!\n\n📅 Dátum: 2026.04.03\n⏰ Idő: 20:55",
+                "❌ Hibás formátum!\n\n📅 2026.04.03\n⏰ 20:55",
                 ephemeral=True
             )
 
@@ -128,9 +120,9 @@ class NotificationModal(Modal, title="Értesítés"):
         await interaction.response.send_message("✅ Mentve!", ephemeral=True)
 
 # ---------- GOMB ----------
-class MenuView(View):
+class MenuView(discord.ui.View):
     @discord.ui.button(label="ÉRTESÍTÉS", style=discord.ButtonStyle.green)
-    async def notify(self, interaction: discord.Interaction, button: Button):
+    async def notify(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(NotificationModal())
 
 # ---------- PARANCSOK ----------
@@ -176,15 +168,19 @@ async def on_ready():
             if channel:
                 dt = datetime.fromisoformat(time_str)
                 asyncio.create_task(schedule_message(channel, dt, msg))
-        except:
-            pass
+        except Exception as e:
+            print("Memory hiba:", e)
 
 # ---------- WEB ----------
 app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "OK"
+    return "Bot is alive", 200
+
+@app.route("/status")
+def status():
+    return "online" if bot.is_ready() else "starting"
 
 @app.route("/memory")
 def memory():
@@ -197,8 +193,16 @@ def memory():
     with open(MEMORY_FILE, "r", encoding="utf-8") as f:
         return f"<pre>{f.read()}</pre>"
 
-Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000))), daemon=True).start()
+def run_web():
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
 
-# ---------- RUN ----------
-bot.run(DISCORD_TOKEN)
+Thread(target=run_web).start()
 
+# ---------- RUN BOT (AUTO RECONNECT) ----------
+while True:
+    try:
+        bot.run(DISCORD_TOKEN)
+    except Exception as e:
+        print("❌ Bot crash:", e)
+        import time
+        time.sleep(5)
