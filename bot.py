@@ -169,12 +169,6 @@ class NotificationModal(discord.ui.Modal, title="Értesítés"):
         if not ok:
             return await interaction.response.send_message(msg, ephemeral=True)
 
-        limit = get_daily_limit()
-        current = count_user_today(interaction.user.id)
-
-        if current >= limit:
-            return await interaction.response.send_message("❌ Limit elérve!", ephemeral=True)
-
         dt = datetime.strptime(f"{self.date.value} {self.time.value}", "%Y.%m.%d %H:%M")
         dt -= timedelta(hours=2)
 
@@ -184,15 +178,20 @@ class NotificationModal(discord.ui.Modal, title="Értesítés"):
 
         await interaction.response.send_message("✅ Mentve!", ephemeral=True)
 
-# ---------- VIEW ----------
+# ---------- VIEW (GLOBAL CHECK!) ----------
 class MenuView(discord.ui.View):
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        ok, msg = check_access(interaction=interaction)
+
+        if not ok:
+            await interaction.response.send_message(msg, ephemeral=True)
+            return False
+
+        return True
 
     @discord.ui.button(label="Értesítés", style=discord.ButtonStyle.green)
     async def notify(self, interaction, button):
-        ok, msg = check_access(interaction=interaction)
-        if not ok:
-            return await interaction.response.send_message(msg, ephemeral=True)
-
         await interaction.response.send_modal(NotificationModal())
 
 # ---------- COMMAND ----------
