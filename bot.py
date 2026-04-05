@@ -1,250 +1,361 @@
 import discord
 from discord.ext import commands
+from datetime import datetime, timedelta
 import os
 import requests
 from dotenv import load_dotenv
-from flask import Flask
+from flask import Flask, request
 from threading import Thread
-import time
+import asyncio
 
 load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+if not DISCORD_TOKEN:
+    raise ValueError("❌ DISCORD_TOKEN nincs beállítva!")
+
 GITHUB_BASE = "https://raw.githubusercontent.com/Mutter65/naplo2026/main/"
-COPY_FILE = "copy.txt"
+MEMORY_FILE = "memory.txt"
 
 # ---------- FILE ----------
-def load_copy_data():
-    if not os.path.exists(COPY_FILE):
-        return []
-    with open(COPY_FILE, "r", encoding="utf-8") as f:
-        return [line.strip() for line in f if line.strip()]
+def save_to_memory(line):
+    with open(MEMORY_FILE, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
 
-def save_copy_pair(guild_id, src, dst, mode):
-    line = f"{guild_id}|{src}|{dst}|{mode}"
-    data = load_copy_data()
+def load_memory():
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+            return [line.strip() for line in f if line.strip()]
 
-    if line not in data:
-        with open(COPY_FILE, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-
-def delete_copy_pair(line):
-    data = load_copy_data()
-    if line in data:
-        data.remove(line)
-    with open(COPY_FILE, "w", encoding="utf-8") as f:
-        for l in data:
-            f.write(l + "\n")
-
-def get_guild_pairs(guild_id):
-    return [l for l in load_copy_data() if l.startswith(str(guild_id))]
-
-# ---------- GITHUB ----------
-def load_copy_from_github():
     try:
-        r = requests.get(GITHUB_BASE + "copy.txt", timeout=10)
+        r = requests.get(GITHUB_BASE + "memory.txt", timeout=10)
         if r.status_code == 200:
-            with open(COPY_FILE, "w", encoding="utf-8") as f:
-                f.write(r.text)
-            print("✅ GitHub copy betöltve")
-    except Exception as e:
-        print("❌ GitHub hiba:", e)
-
-# ---------- ADMIN ----------
-def is_admin(user_id):
-    try:
-        r = requests.get(GITHUB_BASE + "admin.txt", timeout=10)
-        if r.status_code == 200:
-            admins = [line.strip() for line in r.text.splitlines()]
-            return str(user_id) in admins
+            return [line.strip() for line in r.text.splitlines() if line.strip()]
     except:
         pass
-    return False
 
-# ---------- BOT ----------
-intents = discord.Intents.all()
-bot = commands.Bot(command_prefix="!", intents=intents)
+    return []
 
-# ---------- COPY SYSTEM ----------
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
+# ---------- TXT ----------
+def load_txt(filename):
+    try:
+        r = requests.get(GITHUB_BASE + filename, timeout=10)
+        if r.status_code == 200:
+            return [x.strip() for x in r.text.splitlines() if x.strip()]
+    except:
+        pass
+    return []
 
-    for line in load_copy_data():
+def extract_ids_from_lines(lines):
+    return [lines[i] for i in range(1, len(lines), 2) if lines[i].isdigit()]
+
+# ---------- JOG ----------
+def is_server_allowed(guild_id):
+    return str(guild_id) in extract_ids_from_lines(load_txt("serverid.txt"))
+
+def is_user_allowed(member):
+    user_ids = extract_ids_from_lines(load_txt("userid.txt"))
+    roles = load_txt("rangid.txt")
+
+    if str(member.id) in user_ids:
+        return True
+
+    return any(r.name in roles for r in member.roles)
+
+def is_admin(user_id):
+    return str(user_id) in load_txt("admin.txt")
+
+# ---------- LIMIT ----------
+def get_daily_limit():
+    data = load_txt("limit.txt")
+    try:
+        return int(data[0])
+    except:
+        return 10
+
+def count_user_today(user_id):
+    today = datetime.utcnow().date()
+    count = 0
+
+    for line in load_memory():
         try:
             parts = line.split("|")
+            _, _, uid, time_str, _, _ = parts
+            dt = datetime.fromisoformat(time_str)
 
-            if len(parts) == 3:
-                guild_id, src, dst = parts
-                mode = "all"
-            else:
-                guild_id, src, dst, mode = parts
-
-            if str(message.guild.id) != guild_id:
-                continue
-
-            if str(message.channel.id) != src:
-                continue
-
-            if mode == "bot":
-                continue
-
-            ch = bot.get_channel(int(dst))
-            if ch:
-                await ch.send(f"**{message.author}:** {message.content}")
-
+            if str(user_id) == uid and dt.date() == today:
+                count += 1
         except:
             continue
 
-    await bot.process_commands(message)
+    return count
 
-# ---------- MODE SELECT ----------
-class ModeSelectView(discord.ui.View):
+def get_user_limit_info(user_id):
+    limit = get_daily_limit()
+    current = count_user_today(user_id)
+    return current, limit, max(0, limit - current)
 
-    @discord.ui.button(label="🤖 Csak BOT", style=discord.ButtonStyle.blurple)
-    async def bot_only(self, interaction, button):
-        await interaction.response.defer()
-        await interaction.followup.send(
-            "Válassz csatornákat:",
-            view=CopyView("bot"),
-            ephemeral=False
+# ---------- BOT ----------
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+# ---------- CHECK ----------
+def check_access(interaction=None, ctx=None):
+    if interaction:
+        if not is_server_allowed(interaction.guild.id):
+            return False, "❌ Ez a szerver nincs engedélyezve!"
+        if not is_user_allowed(interaction.user):
+            return False, "❌ Nincs jogosultságod!"
+    elif ctx:
+        if not is_server_allowed(ctx.guild.id):
+            return False, "❌ Ez a szerver nincs engedélyezve!"
+        if not is_user_allowed(ctx.author):
+            return False, "❌ Nincs jogosultságod!"
+    return True, None
+
+# ---------- SCHEDULE ----------
+async def schedule_message(channel, send_time, message, user_id, repeat="once"):
+    while True:
+        delay = (send_time - datetime.utcnow()).total_seconds()
+        if delay <= 0:
+            delay = 1
+
+        await asyncio.sleep(delay)
+
+        mention = f"<@{user_id}>"
+
+        embed = discord.Embed(
+            title="📌 Emlékeztető",
+            description=f"**🔴 {message.upper()}**",
+            color=discord.Color.red()
         )
 
-    @discord.ui.button(label="🌍 Minden", style=discord.ButtonStyle.green)
-    async def all_messages(self, interaction, button):
-        await interaction.response.defer()
-        await interaction.followup.send(
-            "Válassz csatornákat:",
-            view=CopyView("all"),
-            ephemeral=False
+        local = send_time + timedelta(hours=2)
+        repeat_text = {"once": "Egyszeri", "daily": "Napi", "weekly": "Heti"}[repeat]
+
+        embed.add_field(name="👤 Kérte", value=mention, inline=False)
+        embed.add_field(name="📅 Dátum", value=local.strftime("%Y.%m.%d"), inline=True)
+        embed.add_field(name="⏰ Idő", value=local.strftime("%H:%M"), inline=True)
+        embed.set_footer(text=f"🔁 {repeat_text} értesítés")
+
+        await channel.send(content=mention, embed=embed)
+
+        if repeat == "once":
+            break
+        elif repeat == "daily":
+            send_time += timedelta(days=1)
+        elif repeat == "weekly":
+            send_time += timedelta(weeks=1)
+
+# ---------- DATA ----------
+def get_user_data(guild_id, user_id):
+    data = load_memory()
+
+    if is_admin(user_id):
+        return [line for line in data if line.startswith(str(guild_id))]
+
+    return [line for line in data if line.startswith(str(guild_id)) and f"|{user_id}|" in line]
+
+# ---------- MODALS ----------
+class NotificationModal(discord.ui.Modal, title="Értesítés"):
+    date = discord.ui.TextInput(label="📅 Dátum (2026.04.03)")
+    time = discord.ui.TextInput(label="⏰ Idő (20:55)")
+    message = discord.ui.TextInput(label="📝 Üzenet")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        ok, msg = check_access(interaction=interaction)
+        if not ok:
+            return await interaction.response.send_message(msg, ephemeral=True)
+
+        dt = datetime.strptime(f"{self.date.value} {self.time.value}", "%Y.%m.%d %H:%M")
+        dt -= timedelta(hours=2)
+
+        save_to_memory(f"{interaction.guild.id}|{interaction.channel.id}|{interaction.user.id}|{dt.isoformat()}|{self.message.value}|once")
+
+        asyncio.create_task(schedule_message(interaction.channel, dt, self.message.value, interaction.user.id, "once"))
+
+        await interaction.response.send_message("✅ Mentve!", ephemeral=True)
+
+class RepeatModal(discord.ui.Modal):
+    def __init__(self, repeat):
+        super().__init__(title="Ismétlődő értesítés")
+        self.repeat = repeat
+
+        self.date = discord.ui.TextInput(label="📅 Dátum (2026.04.03)")
+        self.time = discord.ui.TextInput(label="⏰ Idő (20:55)")
+        self.message = discord.ui.TextInput(label="📝 Üzenet")
+
+        self.add_item(self.date)
+        self.add_item(self.time)
+        self.add_item(self.message)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        ok, msg = check_access(interaction=interaction)
+        if not ok:
+            return await interaction.response.send_message(msg, ephemeral=True)
+
+        dt = datetime.strptime(f"{self.date.value} {self.time.value}", "%Y.%m.%d %H:%M")
+        dt -= timedelta(hours=2)
+
+        save_to_memory(f"{interaction.guild.id}|{interaction.channel.id}|{interaction.user.id}|{dt.isoformat()}|{self.message.value}|{self.repeat}")
+
+        asyncio.create_task(schedule_message(interaction.channel, dt, self.message.value, interaction.user.id, self.repeat))
+
+        await interaction.response.send_message("✅ Mentve!", ephemeral=True)
+
+# ---------- SELECT / VIEWS ----------
+class RepeatSelect(discord.ui.Select):
+    def __init__(self):
+        super().__init__(
+            placeholder="Ismétlés típusa",
+            options=[
+                discord.SelectOption(label="Napi", value="daily"),
+                discord.SelectOption(label="Heti", value="weekly")
+            ]
         )
 
-# ---------- COPY VIEW ----------
-class CopyView(discord.ui.View):
-    def __init__(self, mode):
-        super().__init__(timeout=120)
-        self.mode = mode
-        self.src = None
-        self.add_item(self.Source(self))
-        self.add_item(self.Target(self))
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(RepeatModal(self.values[0]))
 
-    class Source(discord.ui.ChannelSelect):
-        def __init__(self, parent):
-            super().__init__(placeholder="Forrás", channel_types=[discord.ChannelType.text])
-            self.parent = parent
+class RepeatView(discord.ui.View):
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        ok, msg = check_access(interaction=interaction)
+        if not ok:
+            await interaction.response.send_message(msg, ephemeral=True)
+            return False
+        return True
 
-        async def callback(self, interaction):
-            self.parent.src = self.values[0].id
-            await interaction.response.send_message("✅ Forrás kiválasztva", ephemeral=True)
+    def __init__(self):
+        super().__init__()
+        self.add_item(RepeatSelect())
 
-    class Target(discord.ui.ChannelSelect):
-        def __init__(self, parent):
-            super().__init__(placeholder="Cél", channel_types=[discord.ChannelType.text])
-            self.parent = parent
-
-        async def callback(self, interaction):
-            if not self.parent.src:
-                return await interaction.response.send_message("❌ Előbb válassz forrást!", ephemeral=True)
-
-            dst = self.values[0].id
-
-            if self.parent.src == dst:
-                return await interaction.response.send_message("❌ Nem lehet ugyanaz", ephemeral=True)
-
-            save_copy_pair(interaction.guild.id, self.parent.src, dst, self.parent.mode)
-
-            await interaction.response.send_message("✅ Mentve!", ephemeral=True)
-
-# ---------- DELETE ----------
-class DeleteCopySelect(discord.ui.Select):
-    def __init__(self, guild_id):
-        self.data = get_guild_pairs(guild_id)
+class DeleteSelect(discord.ui.Select):
+    def __init__(self, data):
+        self.data = data
 
         options = []
-        for i, line in enumerate(self.data[:25]):
+        for i, line in enumerate(data[:25]):
             parts = line.split("|")
-            _, src, dst, mode = parts if len(parts) == 4 else (*parts, "all")
+            _, _, _, time_str, msg, repeat = parts
 
-            mode_text = "🤖 BOT" if mode == "bot" else "🌍 ALL"
+            dt = datetime.fromisoformat(time_str) + timedelta(hours=2)
 
             options.append(discord.SelectOption(
-                label=f"{src} ➜ {dst}",
-                description=mode_text,
+                label=f"{dt.strftime('%m.%d %H:%M')} • {repeat}",
+                description=msg[:50],
                 value=str(i)
             ))
 
-        super().__init__(placeholder="Törlés", options=options)
+        super().__init__(placeholder="Törlendő kiválasztása", options=options)
 
-    async def callback(self, interaction):
-        line = self.data[int(self.values[0])]
-        delete_copy_pair(line)
-        await interaction.response.send_message("🗑️ Törölve", ephemeral=True)
+    async def callback(self, interaction: discord.Interaction):
+        ok, msg = check_access(interaction=interaction)
+        if not ok:
+            return await interaction.response.send_message(msg, ephemeral=True)
 
-class DeleteCopyView(discord.ui.View):
-    def __init__(self, guild_id):
+        all_data = load_memory()
+        selected = self.data[int(self.values[0])]
+        all_data.remove(selected)
+
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+            for line in all_data:
+                f.write(line + "\n")
+
+        await interaction.response.send_message("🗑️ Törölve!", ephemeral=True)
+
+class DeleteView(discord.ui.View):
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        ok, msg = check_access(interaction=interaction)
+        if not ok:
+            await interaction.response.send_message(msg, ephemeral=True)
+            return False
+        return True
+
+    def __init__(self, data):
         super().__init__()
-        self.add_item(DeleteCopySelect(guild_id))
+        self.add_item(DeleteSelect(data))
 
-# ---------- MENU ----------
-class CopyMenu(discord.ui.View):
+class MenuView(discord.ui.View):
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        ok, msg = check_access(interaction=interaction)
+        if not ok:
+            await interaction.response.send_message(msg, ephemeral=True)
+            return False
+        return True
 
-    @discord.ui.button(label="Másolás", style=discord.ButtonStyle.blurple)
-    async def copy(self, interaction, button):
-        if not is_admin(interaction.user.id):
-            return await interaction.response.send_message("❌ Nem admin", ephemeral=True)
+    @discord.ui.button(label="Értesítés", style=discord.ButtonStyle.green)
+    async def notify(self, interaction, button):
+        await interaction.response.send_modal(NotificationModal())
 
-        await interaction.response.send_message(
-            "Válassz módot:",
-            view=ModeSelectView(),
-            ephemeral=True
-        )
+    @discord.ui.button(label="Ismétlődő", style=discord.ButtonStyle.blurple)
+    async def repeat(self, interaction, button):
+        await interaction.response.send_message("Válassz:", view=RepeatView(), ephemeral=True)
 
     @discord.ui.button(label="Törlés", style=discord.ButtonStyle.red)
     async def delete(self, interaction, button):
-        if not is_admin(interaction.user.id):
-            return await interaction.response.send_message("❌ Nem admin", ephemeral=True)
+        data = get_user_data(interaction.guild.id, interaction.user.id)
+        if not data:
+            return await interaction.response.send_message("📭 Nincs adat", ephemeral=True)
 
-        await interaction.response.send_message(
-            "Törlés:",
-            view=DeleteCopyView(interaction.guild.id),
-            ephemeral=True
-        )
+        await interaction.response.send_message("Válassz:", view=DeleteView(data), ephemeral=True)
 
     @discord.ui.button(label="Lista", style=discord.ButtonStyle.gray)
     async def list_btn(self, interaction, button):
-        if not is_admin(interaction.user.id):
-            return await interaction.response.send_message("❌ Nem admin", ephemeral=True)
-
-        data = get_guild_pairs(interaction.guild.id)
+        data = get_user_data(interaction.guild.id, interaction.user.id)
 
         if not data:
             return await interaction.response.send_message("📭 Üres", ephemeral=True)
 
         embed = discord.Embed(title="📋 Lista", color=discord.Color.green())
 
-        for line in data[:10]:
+        for i, line in enumerate(data[:10]):
             parts = line.split("|")
-            _, src, dst, mode = parts if len(parts) == 4 else (*parts, "all")
-            mode_text = "🤖 BOT" if mode == "bot" else "🌍 ALL"
+            _, _, _, time_str, msg, repeat = parts
+            dt = datetime.fromisoformat(time_str) + timedelta(hours=2)
 
-            embed.add_field(name=f"{src} ➜ {dst}", value=mode_text, inline=False)
+            embed.add_field(
+                name=f"{i}. {dt.strftime('%m.%d %H:%M')}",
+                value=f"{repeat} | {msg}",
+                inline=False
+            )
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ---------- COMMAND ----------
-@bot.command(aliases=["n"])
-async def copy(ctx):
-    if not is_admin(ctx.author.id):
-        return await ctx.send("❌ Nem admin!")
+@bot.command()
+async def n(ctx):
+    ok, msg = check_access(ctx=ctx)
+    if not ok:
+        return await ctx.send(msg)
 
-    await ctx.send("📋 Copy panel:", view=CopyMenu())
+    current, limit, remaining = get_user_limit_info(ctx.author.id)
+
+    embed = discord.Embed(title="📌 Központ", color=discord.Color.blurple())
+    embed.add_field(name="📊 Limit", value=f"{current}/{limit} | {remaining} maradt")
+
+    await ctx.send(embed=embed, view=MenuView())
 
 # ---------- READY ----------
 @bot.event
 async def on_ready():
     print("Bot fut:", bot.user)
-    load_copy_from_github()
+
+    for line in load_memory():
+        try:
+            guild_id, channel_id, user_id, time_str, msg, repeat = line.split("|", 5)
+
+            if not is_server_allowed(int(guild_id)):
+                continue
+
+            channel = bot.get_channel(int(channel_id))
+            if not channel:
+                continue
+
+            dt = datetime.fromisoformat(time_str)
+            asyncio.create_task(schedule_message(channel, dt, msg, int(user_id), repeat))
+        except:
+            continue
 
 # ---------- WEB ----------
 app = Flask(__name__)
@@ -253,12 +364,18 @@ app = Flask(__name__)
 def home():
     return "ok"
 
+@app.route("/memory")
+def mem():
+    if request.args.get("key") != "titkos123":
+        return "no"
+    return "<pre>" + open(MEMORY_FILE).read() + "</pre>"
+
 Thread(target=lambda: app.run(host="0.0.0.0", port=10000)).start()
 
 # ---------- RUN ----------
 while True:
     try:
         bot.run(DISCORD_TOKEN)
-    except Exception as e:
-        print("Újraindul...", e)
+    except:
+        import time
         time.sleep(5)
