@@ -1,6 +1,5 @@
 import discord
 from discord.ext import commands
-from datetime import datetime
 import os
 import requests
 from dotenv import load_dotenv
@@ -14,16 +13,16 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GITHUB_BASE = "https://raw.githubusercontent.com/Mutter65/naplo2026/main/"
 COPY_FILE = "copy.txt"
 
-# ---------- COPY FILE ----------
+# ---------- FILE ----------
 def load_copy_data():
     if not os.path.exists(COPY_FILE):
         return []
     with open(COPY_FILE, "r") as f:
         return [line.strip() for line in f if line.strip()]
 
-def save_copy_pair(guild_id, src, dst):
+def save_copy_pair(guild_id, src, dst, mode):
     with open(COPY_FILE, "a") as f:
-        f.write(f"{guild_id}|{src}|{dst}\n")
+        f.write(f"{guild_id}|{src}|{dst}|{mode}\n")
 
 def delete_copy_pair(line):
     data = load_copy_data()
@@ -36,14 +35,14 @@ def delete_copy_pair(line):
 def get_guild_pairs(guild_id):
     return [l for l in load_copy_data() if l.startswith(str(guild_id))]
 
-# ---------- GITHUB LOAD ----------
+# ---------- GITHUB ----------
 def load_copy_from_github():
     try:
         r = requests.get(GITHUB_BASE + "copy.txt", timeout=10)
         if r.status_code == 200:
             with open(COPY_FILE, "w", encoding="utf-8") as f:
                 f.write(r.text)
-            print("✅ copy.txt betöltve GitHub-ról")
+            print("✅ GitHub copy betöltve")
     except:
         print("❌ GitHub hiba")
 
@@ -52,8 +51,7 @@ def is_admin(user_id):
     try:
         r = requests.get(GITHUB_BASE + "admin.txt", timeout=10)
         if r.status_code == 200:
-            data = [x.strip() for x in r.text.splitlines() if x.strip()]
-            return str(user_id) in data
+            return str(user_id) in r.text
     except:
         pass
     return False
@@ -66,31 +64,64 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ---------- COPY SYSTEM ----------
 @bot.event
 async def on_message(message):
-    if message.author.bot:
-        return
+    if message.author.bot is False and message.author != bot.user:
+        pass
 
     for line in load_copy_data():
         try:
-            guild_id, src, dst = line.split("|")
+            parts = line.split("|")
+
+            if len(parts) == 3:
+                guild_id, src, dst = parts
+                mode = "all"
+            else:
+                guild_id, src, dst, mode = parts
 
             if str(message.guild.id) != guild_id:
                 continue
 
-            if str(message.channel.id) == src:
-                ch = bot.get_channel(int(dst))
-                if ch:
-                    await ch.send(f"**{message.author}:** {message.content}")
+            if str(message.channel.id) != src:
+                continue
+
+            if mode == "bot" and message.author != bot.user:
+                continue
+
+            ch = bot.get_channel(int(dst))
+            if ch:
+                await ch.send(f"**{message.author}:** {message.content}")
+
         except:
             continue
 
     await bot.process_commands(message)
 
-# ---------- UI ----------
-class CopyView(discord.ui.View):
-    def __init__(self):
-        super().__init__()
-        self.src = None
+# ---------- MODE SELECT ----------
+class ModeSelectView(discord.ui.View):
 
+    @discord.ui.button(label="🤖 Csak BOT", style=discord.ButtonStyle.blurple)
+    async def bot_only(self, interaction, button):
+        await interaction.response.defer(ephemeral=True)
+        await interaction.followup.send(
+            "Válassz csatornákat:",
+            view=CopyView("bot"),
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="🌍 Minden", style=discord.ButtonStyle.green)
+    async def all_messages(self, interaction, button):
+        await interaction.response.defer(ephemeral=True)
+        await interaction.followup.send(
+            "Válassz csatornákat:",
+            view=CopyView("all"),
+            ephemeral=True
+        )
+
+# ---------- COPY VIEW ----------
+class CopyView(discord.ui.View):
+    def __init__(self, mode):
+        super().__init__()
+        self.mode = mode
+        self.src = None
         self.add_item(self.Source(self))
         self.add_item(self.Target(self))
 
@@ -114,7 +145,7 @@ class CopyView(discord.ui.View):
             if self.parent.src == dst:
                 return await interaction.response.send_message("❌ Nem lehet ugyanaz", ephemeral=True)
 
-            save_copy_pair(interaction.guild.id, self.parent.src, dst)
+            save_copy_pair(interaction.guild.id, self.parent.src, dst, self.parent.mode)
 
             await interaction.response.send_message("✅ Mentve!", ephemeral=True)
 
@@ -125,9 +156,14 @@ class DeleteCopySelect(discord.ui.Select):
 
         options = []
         for i, line in enumerate(self.data[:25]):
-            _, src, dst = line.split("|")
+            parts = line.split("|")
+            _, src, dst, mode = parts if len(parts) == 4 else (*parts, "all")
+
+            mode_text = "🤖 BOT" if mode == "bot" else "🌍 ALL"
+
             options.append(discord.SelectOption(
                 label=f"{src} ➜ {dst}",
+                description=mode_text,
                 value=str(i)
             ))
 
@@ -151,14 +187,23 @@ class CopyMenu(discord.ui.View):
         if not is_admin(interaction.user.id):
             return await interaction.response.send_message("❌ Nem admin", ephemeral=True)
 
-        await interaction.response.send_message("Válassz:", view=CopyView(), ephemeral=True)
+        await interaction.response.send_message(
+            "Válassz módot:",
+            view=ModeSelectView(),
+            ephemeral=True
+        )
 
     @discord.ui.button(label="Törlés", style=discord.ButtonStyle.red)
     async def delete(self, interaction, button):
         if not is_admin(interaction.user.id):
             return await interaction.response.send_message("❌ Nem admin", ephemeral=True)
 
-        await interaction.response.send_message("Törlés:", view=DeleteCopyView(interaction.guild.id), ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        await interaction.followup.send(
+            "Törlés:",
+            view=DeleteCopyView(interaction.guild.id),
+            ephemeral=True
+        )
 
     @discord.ui.button(label="Lista", style=discord.ButtonStyle.gray)
     async def list_btn(self, interaction, button):
@@ -173,8 +218,16 @@ class CopyMenu(discord.ui.View):
         embed = discord.Embed(title="📋 Lista", color=discord.Color.green())
 
         for line in data[:10]:
-            _, src, dst = line.split("|")
-            embed.add_field(name=f"{src} ➜ {dst}", value="aktív", inline=False)
+            parts = line.split("|")
+            _, src, dst, mode = parts if len(parts) == 4 else (*parts, "all")
+
+            mode_text = "🤖 BOT" if mode == "bot" else "🌍 ALL"
+
+            embed.add_field(
+                name=f"{src} ➜ {dst}",
+                value=mode_text,
+                inline=False
+            )
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -184,33 +237,33 @@ class CopyMenu(discord.ui.View):
         if not is_admin(interaction.user.id):
             return await interaction.response.send_message("❌ Nem admin", ephemeral=True)
 
+        await interaction.response.defer(ephemeral=True)
+
         data = load_copy_data()
-
-        if not data:
-            return await interaction.response.send_message("📭 Üres", ephemeral=True)
-
-        embed = discord.Embed(title="🌍 Összes lista", color=discord.Color.gold())
-
         grouped = {}
 
         for line in data:
             try:
-                gid, src, dst = line.split("|")
-                grouped.setdefault(gid, []).append((src, dst))
+                parts = line.split("|")
+                gid, src, dst, mode = parts if len(parts) == 4 else (*parts, "all")
+                grouped.setdefault(gid, []).append((src, dst, mode))
             except:
                 continue
+
+        embed = discord.Embed(title="🌍 Összes lista", color=discord.Color.gold())
 
         for gid, pairs in grouped.items():
             guild = bot.get_guild(int(gid))
             name = guild.name if guild else gid
 
             text = ""
-            for src, dst in pairs[:5]:
-                text += f"{src} ➜ {dst}\n"
+            for src, dst, mode in pairs[:5]:
+                icon = "🤖" if mode == "bot" else "🌍"
+                text += f"{icon} {src} ➜ {dst}\n"
 
             embed.add_field(name=name, value=text or "nincs", inline=False)
 
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 # ---------- COMMAND ----------
 @bot.command()
@@ -229,35 +282,34 @@ async def on_ready():
 # ---------- WEB ----------
 app = Flask(__name__)
 
-@app.route("/")
-def home():
-    return "ok"
-
 @app.route("/copy")
 def copy_web():
-
     if request.args.get("key") != "titkos123":
         return "no"
 
     data = load_copy_data()
 
+    text = ""
     grouped = {}
 
     for line in data:
         try:
-            gid, src, dst = line.split("|")
-            grouped.setdefault(gid, []).append((src, dst))
+            parts = line.split("|")
+            gid, src, dst, mode = parts if len(parts) == 4 else (*parts, "all")
+            grouped.setdefault(gid, []).append((src, dst, mode))
         except:
             continue
 
-    text = ""
-
     for gid, pairs in grouped.items():
         text += f"\n=== {gid} ===\n"
-        for src, dst in pairs:
-            text += f"{src} -> {dst}\n"
+        for src, dst, mode in pairs:
+            text += f"{mode} | {src} -> {dst}\n"
 
     return "<pre>" + text + "</pre>"
+
+@app.route("/")
+def home():
+    return "ok"
 
 Thread(target=lambda: app.run(host="0.0.0.0", port=10000)).start()
 
