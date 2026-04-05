@@ -112,7 +112,6 @@ def check_access(interaction=None, ctx=None):
             return False, "❌ Ez a szerver nincs engedélyezve!"
         if not is_user_allowed(ctx.author):
             return False, "❌ Nincs jogosultságod!"
-
     return True, None
 
 # ---------- SCHEDULE ----------
@@ -158,7 +157,7 @@ def get_user_data(guild_id, user_id):
 
     return [line for line in data if line.startswith(str(guild_id)) and f"|{user_id}|" in line]
 
-# ---------- MODAL ----------
+# ---------- MODALS ----------
 class NotificationModal(discord.ui.Modal, title="Értesítés"):
     date = discord.ui.TextInput(label="📅 Dátum (2026.04.03)")
     time = discord.ui.TextInput(label="⏰ Idő (20:55)")
@@ -178,21 +177,150 @@ class NotificationModal(discord.ui.Modal, title="Értesítés"):
 
         await interaction.response.send_message("✅ Mentve!", ephemeral=True)
 
-# ---------- VIEW (GLOBAL CHECK!) ----------
-class MenuView(discord.ui.View):
+class RepeatModal(discord.ui.Modal):
+    def __init__(self, repeat):
+        super().__init__(title="Ismétlődő értesítés")
+        self.repeat = repeat
 
+        self.date = discord.ui.TextInput(label="📅 Dátum (2026.04.03)")
+        self.time = discord.ui.TextInput(label="⏰ Idő (20:55)")
+        self.message = discord.ui.TextInput(label="📝 Üzenet")
+
+        self.add_item(self.date)
+        self.add_item(self.time)
+        self.add_item(self.message)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        ok, msg = check_access(interaction=interaction)
+        if not ok:
+            return await interaction.response.send_message(msg, ephemeral=True)
+
+        dt = datetime.strptime(f"{self.date.value} {self.time.value}", "%Y.%m.%d %H:%M")
+        dt -= timedelta(hours=2)
+
+        save_to_memory(f"{interaction.guild.id}|{interaction.channel.id}|{interaction.user.id}|{dt.isoformat()}|{self.message.value}|{self.repeat}")
+
+        asyncio.create_task(schedule_message(interaction.channel, dt, self.message.value, interaction.user.id, self.repeat))
+
+        await interaction.response.send_message("✅ Mentve!", ephemeral=True)
+
+# ---------- SELECT / VIEWS ----------
+class RepeatSelect(discord.ui.Select):
+    def __init__(self):
+        super().__init__(
+            placeholder="Ismétlés típusa",
+            options=[
+                discord.SelectOption(label="Napi", value="daily"),
+                discord.SelectOption(label="Heti", value="weekly")
+            ]
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(RepeatModal(self.values[0]))
+
+class RepeatView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         ok, msg = check_access(interaction=interaction)
-
         if not ok:
             await interaction.response.send_message(msg, ephemeral=True)
             return False
+        return True
 
+    def __init__(self):
+        super().__init__()
+        self.add_item(RepeatSelect())
+
+class DeleteSelect(discord.ui.Select):
+    def __init__(self, data):
+        self.data = data
+
+        options = []
+        for i, line in enumerate(data[:25]):
+            parts = line.split("|")
+            _, _, _, time_str, msg, repeat = parts
+
+            dt = datetime.fromisoformat(time_str) + timedelta(hours=2)
+
+            options.append(discord.SelectOption(
+                label=f"{dt.strftime('%m.%d %H:%M')} • {repeat}",
+                description=msg[:50],
+                value=str(i)
+            ))
+
+        super().__init__(placeholder="Törlendő kiválasztása", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        ok, msg = check_access(interaction=interaction)
+        if not ok:
+            return await interaction.response.send_message(msg, ephemeral=True)
+
+        all_data = load_memory()
+        selected = self.data[int(self.values[0])]
+        all_data.remove(selected)
+
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+            for line in all_data:
+                f.write(line + "\n")
+
+        await interaction.response.send_message("🗑️ Törölve!", ephemeral=True)
+
+class DeleteView(discord.ui.View):
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        ok, msg = check_access(interaction=interaction)
+        if not ok:
+            await interaction.response.send_message(msg, ephemeral=True)
+            return False
+        return True
+
+    def __init__(self, data):
+        super().__init__()
+        self.add_item(DeleteSelect(data))
+
+class MenuView(discord.ui.View):
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        ok, msg = check_access(interaction=interaction)
+        if not ok:
+            await interaction.response.send_message(msg, ephemeral=True)
+            return False
         return True
 
     @discord.ui.button(label="Értesítés", style=discord.ButtonStyle.green)
     async def notify(self, interaction, button):
         await interaction.response.send_modal(NotificationModal())
+
+    @discord.ui.button(label="Ismétlődő", style=discord.ButtonStyle.blurple)
+    async def repeat(self, interaction, button):
+        await interaction.response.send_message("Válassz:", view=RepeatView(), ephemeral=True)
+
+    @discord.ui.button(label="Törlés", style=discord.ButtonStyle.red)
+    async def delete(self, interaction, button):
+        data = get_user_data(interaction.guild.id, interaction.user.id)
+        if not data:
+            return await interaction.response.send_message("📭 Nincs adat", ephemeral=True)
+
+        await interaction.response.send_message("Válassz:", view=DeleteView(data), ephemeral=True)
+
+    @discord.ui.button(label="Lista", style=discord.ButtonStyle.gray)
+    async def list_btn(self, interaction, button):
+        data = get_user_data(interaction.guild.id, interaction.user.id)
+
+        if not data:
+            return await interaction.response.send_message("📭 Üres", ephemeral=True)
+
+        embed = discord.Embed(title="📋 Lista", color=discord.Color.green())
+
+        for i, line in enumerate(data[:10]):
+            parts = line.split("|")
+            _, _, _, time_str, msg, repeat = parts
+            dt = datetime.fromisoformat(time_str) + timedelta(hours=2)
+
+            embed.add_field(
+                name=f"{i}. {dt.strftime('%m.%d %H:%M')}",
+                value=f"{repeat} | {msg}",
+                inline=False
+            )
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ---------- COMMAND ----------
 @bot.command()
@@ -225,7 +353,6 @@ async def on_ready():
                 continue
 
             dt = datetime.fromisoformat(time_str)
-
             asyncio.create_task(schedule_message(channel, dt, msg, int(user_id), repeat))
         except:
             continue
