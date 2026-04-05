@@ -3,7 +3,7 @@ from discord.ext import commands
 import os
 import requests
 from dotenv import load_dotenv
-from flask import Flask, request
+from flask import Flask
 from threading import Thread
 import time
 
@@ -24,7 +24,7 @@ def save_copy_pair(guild_id, src, dst, mode):
     line = f"{guild_id}|{src}|{dst}|{mode}"
     data = load_copy_data()
 
-    if line not in data:  # duplikáció védelem
+    if line not in data:
         with open(COPY_FILE, "a", encoding="utf-8") as f:
             f.write(line + "\n")
 
@@ -47,15 +47,16 @@ def load_copy_from_github():
             with open(COPY_FILE, "w", encoding="utf-8") as f:
                 f.write(r.text)
             print("✅ GitHub copy betöltve")
-    except:
-        print("❌ GitHub hiba")
+    except Exception as e:
+        print("❌ GitHub hiba:", e)
 
 # ---------- ADMIN ----------
 def is_admin(user_id):
     try:
         r = requests.get(GITHUB_BASE + "admin.txt", timeout=10)
         if r.status_code == 200:
-            return str(user_id) in r.text
+            admins = [line.strip() for line in r.text.splitlines()]
+            return str(user_id) in admins
     except:
         pass
     return False
@@ -87,7 +88,7 @@ async def on_message(message):
                 continue
 
             if mode == "bot":
-                continue  # csak bot üzenetekhez (nem használjuk most)
+                continue
 
             ch = bot.get_channel(int(dst))
             if ch:
@@ -107,7 +108,7 @@ class ModeSelectView(discord.ui.View):
         await interaction.followup.send(
             "Válassz csatornákat:",
             view=CopyView("bot"),
-            ephemeral=False  # FIX
+            ephemeral=False
         )
 
     @discord.ui.button(label="🌍 Minden", style=discord.ButtonStyle.green)
@@ -116,7 +117,7 @@ class ModeSelectView(discord.ui.View):
         await interaction.followup.send(
             "Válassz csatornákat:",
             view=CopyView("all"),
-            ephemeral=False  # FIX
+            ephemeral=False
         )
 
 # ---------- COPY VIEW ----------
@@ -232,7 +233,7 @@ class CopyMenu(discord.ui.View):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ---------- COMMAND ----------
-@bot.command()
+@bot.command(aliases=["n"])
 async def copy(ctx):
     if not is_admin(ctx.author.id):
         return await ctx.send("❌ Nem admin!")
@@ -258,6 +259,6 @@ Thread(target=lambda: app.run(host="0.0.0.0", port=10000)).start()
 while True:
     try:
         bot.run(DISCORD_TOKEN)
-    except:
-        print("Újraindul...")
+    except Exception as e:
+        print("Újraindul...", e)
         time.sleep(5)
