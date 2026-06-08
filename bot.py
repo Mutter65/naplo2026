@@ -399,10 +399,10 @@ async def handle_money(message):
         gbp = huf * rates["GBP"]
 
         await message.reply(
-            f"💰 Ez az összeg:\\n"
-            f"🇭🇺 {round(huf):,.0f} HUF\\n"
-            f"🇺🇸 ${usd:.2f}\\n"
-            f"🇪🇺 €{eur:.2f}\\n"
+            f"💰 Ez az összeg:\n"
+            f"🇭🇺 {round(huf):,.0f} HUF\n"
+            f"🇺🇸 ${usd:.2f}\n"
+            f"🇪🇺 €{eur:.2f}\n"
             f"🇬🇧 £{gbp:.2f}"
         )
         return
