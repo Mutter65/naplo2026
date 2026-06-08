@@ -349,6 +349,27 @@ async def n(ctx):
     await ctx.send(embed=embed, view=MenuView())
 
 
+
+
+@bot.command()
+async def e(ctx):
+    ok, msg = check_access(ctx=ctx)
+    if not ok:
+        return await ctx.send(msg)
+
+    current, limit, remaining = get_user_limit_info(ctx.author.id)
+
+    embed = discord.Embed(title="📌 Kibővített értesítő", color=discord.Color.gold())
+    embed.add_field(name="📊 Limit", value=f"{current}/{limit} | {remaining} maradt")
+    embed.add_field(
+        name="ℹ️",
+        value="Az !e parancs továbbfejlesztése szükséges a rang/user/@everyone kiválasztó UI teljes működéséhez.",
+        inline=False
+    )
+
+    await ctx.send(embed=embed, view=MenuView())
+
+
 # ---------- AUTO MONEY / TIME ----------
 import re
 
