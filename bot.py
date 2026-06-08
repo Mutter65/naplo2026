@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import os
 import requests
 from dotenv import load_dotenv
@@ -131,7 +132,10 @@ async def schedule_message(channel, send_time, message, user_id, repeat="once"):
             color=discord.Color.red()
         )
 
-        local = send_time + timedelta(hours=2)
+        if send_time.tzinfo is None:
+            send_time = send_time.replace(tzinfo=ZoneInfo("UTC"))
+
+        local = send_time.astimezone(ZoneInfo("Europe/Budapest"))
         repeat_text = {"once": "Egyszeri", "daily": "Napi", "weekly": "Heti"}[repeat]
 
         embed.add_field(name="👤 Kérte", value=mention, inline=False)
@@ -168,8 +172,9 @@ class NotificationModal(discord.ui.Modal, title="Értesítés"):
         if not ok:
             return await interaction.response.send_message(msg, ephemeral=True)
 
-        dt = datetime.strptime(f"{self.date.value} {self.time.value}", "%Y.%m.%d %H:%M")
-        dt -= timedelta(hours=2)
+        dt_local = datetime.strptime(f"{self.date.value} {self.time.value}", "%Y.%m.%d %H:%M")
+        dt_local = dt_local.replace(tzinfo=ZoneInfo("Europe/Budapest"))
+        dt = dt_local.astimezone(ZoneInfo("UTC"))
 
         save_to_memory(f"{interaction.guild.id}|{interaction.channel.id}|{interaction.user.id}|{dt.isoformat()}|{self.message.value}|once")
 
@@ -195,8 +200,9 @@ class RepeatModal(discord.ui.Modal):
         if not ok:
             return await interaction.response.send_message(msg, ephemeral=True)
 
-        dt = datetime.strptime(f"{self.date.value} {self.time.value}", "%Y.%m.%d %H:%M")
-        dt -= timedelta(hours=2)
+        dt_local = datetime.strptime(f"{self.date.value} {self.time.value}", "%Y.%m.%d %H:%M")
+        dt_local = dt_local.replace(tzinfo=ZoneInfo("Europe/Budapest"))
+        dt = dt_local.astimezone(ZoneInfo("UTC"))
 
         save_to_memory(f"{interaction.guild.id}|{interaction.channel.id}|{interaction.user.id}|{dt.isoformat()}|{self.message.value}|{self.repeat}")
 
@@ -239,7 +245,10 @@ class DeleteSelect(discord.ui.Select):
             parts = line.split("|")
             _, _, _, time_str, msg, repeat = parts
 
-            dt = datetime.fromisoformat(time_str) + timedelta(hours=2)
+            dt = datetime.fromisoformat(time_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+            dt = dt.astimezone(ZoneInfo("Europe/Budapest"))
 
             options.append(discord.SelectOption(
                 label=f"{dt.strftime('%m.%d %H:%M')} • {repeat}",
@@ -312,7 +321,10 @@ class MenuView(discord.ui.View):
         for i, line in enumerate(data[:10]):
             parts = line.split("|")
             _, _, _, time_str, msg, repeat = parts
-            dt = datetime.fromisoformat(time_str) + timedelta(hours=2)
+            dt = datetime.fromisoformat(time_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+            dt = dt.astimezone(ZoneInfo("Europe/Budapest"))
 
             embed.add_field(
                 name=f"{i}. {dt.strftime('%m.%d %H:%M')}",
@@ -336,6 +348,116 @@ async def n(ctx):
 
     await ctx.send(embed=embed, view=MenuView())
 
+
+# ---------- AUTO MONEY / TIME ----------
+import re
+
+def get_rates():
+    try:
+        r = requests.get("https://api.exchangerate.host/latest?base=HUF", timeout=10).json()
+        return {
+            "HUF": 1,
+            "EUR": r["rates"]["EUR"],
+            "USD": r["rates"]["USD"],
+            "GBP": r["rates"]["GBP"]
+        }
+    except:
+        return None
+
+async def handle_money(message):
+    rates = get_rates()
+    if not rates:
+        return
+
+    patterns = [
+        (r'€\s?(\d+(?:\.\d+)?)', 'EUR'),
+        (r'\$\s?(\d+(?:\.\d+)?)', 'USD'),
+        (r'£\s?(\d+(?:\.\d+)?)', 'GBP'),
+        (r'(\d+(?:\.\d+)?)\s?HUF', 'HUF')
+    ]
+
+    for pattern, currency in patterns:
+        match = re.search(pattern, message.content, re.I)
+        if not match:
+            continue
+
+        amount = float(match.group(1))
+
+        if currency == "HUF":
+            huf = amount
+        else:
+            huf = amount / rates[currency]
+
+        usd = huf * rates["USD"]
+        eur = huf * rates["EUR"]
+        gbp = huf * rates["GBP"]
+
+        await message.reply(
+            f"💰 Ez az összeg:\\n"
+            f"🇭🇺 {round(huf):,.0f} HUF\\n"
+            f"🇺🇸 ${usd:.2f}\\n"
+            f"🇪🇺 €{eur:.2f}\\n"
+            f"🇬🇧 £{gbp:.2f}"
+        )
+        return
+
+async def handle_time(message):
+    patterns = {
+        "CEST": "Europe/Budapest",
+        "CET": "Europe/Budapest",
+        "PT": "America/Los_Angeles",
+        "ET": "America/New_York",
+        "UTC": "UTC",
+        "GMT": "UTC"
+    }
+
+    match = re.search(
+        r'(CEST|CET|PT|ET|UTC|GMT)\s+(\d{1,2}):(\d{2})(AM|PM)',
+        message.content,
+        re.I
+    )
+
+    if not match:
+        return
+
+    tz_name = match.group(1).upper()
+    hour = int(match.group(2))
+    minute = int(match.group(3))
+    ampm = match.group(4).upper()
+
+    if ampm == "PM" and hour != 12:
+        hour += 12
+    if ampm == "AM" and hour == 12:
+        hour = 0
+
+    now = datetime.now()
+    source = datetime(
+        now.year, now.month, now.day,
+        hour, minute,
+        tzinfo=ZoneInfo(patterns[tz_name])
+    )
+
+    hu = source.astimezone(ZoneInfo("Europe/Budapest"))
+    txt = hu.strftime("%H:%M")
+
+    if hu.date() > source.date():
+        txt += " (másnap)"
+
+    await message.reply(f"🇭🇺 Magyar idő szerint: {txt}")
+
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    perms = message.channel.permissions_for(message.guild.me)
+    if perms.send_messages:
+        await handle_money(message)
+        await handle_time(message)
+
+    await bot.process_commands(message)
+
+
 # ---------- READY ----------
 @bot.event
 async def on_ready():
@@ -353,6 +475,8 @@ async def on_ready():
                 continue
 
             dt = datetime.fromisoformat(time_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=ZoneInfo("UTC"))
             asyncio.create_task(schedule_message(channel, dt, msg, int(user_id), repeat))
         except:
             continue
