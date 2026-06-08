@@ -116,7 +116,7 @@ def check_access(interaction=None, ctx=None):
     return True, None
 
 # ---------- SCHEDULE ----------
-async def schedule_message(channel, send_time, message, user_id, repeat="once"):
+async def schedule_message(channel, send_time, message, user_id, repeat="once", target_type="user"):
     while True:
         delay = (send_time - datetime.now(ZoneInfo("UTC"))).total_seconds()
         if delay <= 0:
@@ -124,7 +124,10 @@ async def schedule_message(channel, send_time, message, user_id, repeat="once"):
 
         await asyncio.sleep(delay)
 
-        mention = f"<@{user_id}>"
+        if target_type == "everyone":
+            mention = "@everyone"
+        else:
+            mention = f"<@{user_id}>"
 
         embed = discord.Embed(
             title="📌 Emlékeztető",
@@ -143,7 +146,11 @@ async def schedule_message(channel, send_time, message, user_id, repeat="once"):
         embed.add_field(name="⏰ Idő", value=local.strftime("%H:%M"), inline=True)
         embed.set_footer(text=f"🔁 {repeat_text} értesítés")
 
-        await channel.send(content=mention, embed=embed)
+        await channel.send(
+            content=mention,
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions(everyone=True, users=True)
+        )
 
         if repeat == "once":
             break
@@ -163,6 +170,10 @@ def get_user_data(guild_id, user_id):
 
 # ---------- MODALS ----------
 class NotificationModal(discord.ui.Modal, title="Értesítés"):
+    def __init__(self):
+        super().__init__()
+        self.target_type = "user"
+
     date = discord.ui.TextInput(label="📅 Dátum (2026.04.03)")
     time = discord.ui.TextInput(label="⏰ Idő (20:55)")
     message = discord.ui.TextInput(label="📝 Üzenet")
@@ -178,7 +189,7 @@ class NotificationModal(discord.ui.Modal, title="Értesítés"):
 
         save_to_memory(f"{interaction.guild.id}|{interaction.channel.id}|{interaction.user.id}|{dt.isoformat()}|{self.message.value}|once")
 
-        asyncio.create_task(schedule_message(interaction.channel, dt, self.message.value, interaction.user.id, "once"))
+        asyncio.create_task(schedule_message(interaction.channel, dt, self.message.value, interaction.user.id, "once", self.target_type))
 
         await interaction.response.send_message("✅ Mentve!", ephemeral=True)
 
@@ -285,6 +296,23 @@ class DeleteView(discord.ui.View):
         super().__init__()
         self.add_item(DeleteSelect(data))
 
+
+class NotifyChoiceView(discord.ui.View):
+    @discord.ui.button(label="Saját magam", style=discord.ButtonStyle.green)
+    async def me(self, interaction, button):
+        await interaction.response.send_message(
+            "Kit pingeljen az értesítés?",
+            view=NotifyChoiceView(),
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="@everyone", style=discord.ButtonStyle.red)
+    async def everyone(self, interaction, button):
+        modal = NotificationModal()
+        modal.target_type = "everyone"
+        await interaction.response.send_modal(modal)
+
+
 class MenuView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         ok, msg = check_access(interaction=interaction)
@@ -295,7 +323,11 @@ class MenuView(discord.ui.View):
 
     @discord.ui.button(label="Értesítés", style=discord.ButtonStyle.green)
     async def notify(self, interaction, button):
-        await interaction.response.send_modal(NotificationModal())
+        await interaction.response.send_message(
+            "Kit pingeljen az értesítés?",
+            view=NotifyChoiceView(),
+            ephemeral=True
+        )
 
     @discord.ui.button(label="Ismétlődő", style=discord.ButtonStyle.blurple)
     async def repeat(self, interaction, button):
