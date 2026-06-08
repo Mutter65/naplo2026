@@ -298,13 +298,12 @@ class DeleteView(discord.ui.View):
 
 
 class NotifyChoiceView(discord.ui.View):
+
     @discord.ui.button(label="Saját magam", style=discord.ButtonStyle.green)
     async def me(self, interaction, button):
-        await interaction.response.send_message(
-            "Kit pingeljen az értesítés?",
-            view=NotifyChoiceView(),
-            ephemeral=True
-        )
+        modal = NotificationModal()
+        modal.target_type = "user"
+        await interaction.response.send_modal(modal)
 
     @discord.ui.button(label="@everyone", style=discord.ButtonStyle.red)
     async def everyone(self, interaction, button):
