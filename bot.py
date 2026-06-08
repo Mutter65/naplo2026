@@ -354,14 +354,20 @@ import re
 
 def get_rates():
     try:
-        r = requests.get("https://api.exchangerate.host/latest?base=HUF", timeout=10).json()
+        r = requests.get(
+            "https://open.er-api.com/v6/latest/HUF",
+            timeout=10
+        )
+        data = r.json()
+
         return {
-            "HUF": 1,
-            "EUR": r["rates"]["EUR"],
-            "USD": r["rates"]["USD"],
-            "GBP": r["rates"]["GBP"]
+            "HUF": 1.0,
+            "USD": float(data["rates"]["USD"]),
+            "EUR": float(data["rates"]["EUR"]),
+            "GBP": float(data["rates"]["GBP"])
         }
-    except:
+    except Exception as e:
+        print("Árfolyam hiba:", e)
         return None
 
 async def handle_money(message):
@@ -450,7 +456,7 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    perms = message.channel.permissions_for(message.guild.me)
+    perms = message.channel.permissions_for(message.guild.me if message.guild else bot.user)
     if perms.send_messages:
         await handle_money(message)
         await handle_time(message)
