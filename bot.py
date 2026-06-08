@@ -286,6 +286,109 @@ class DeleteView(discord.ui.View):
         self.add_item(DeleteSelect(data))
 
 class MenuView(discord.ui.View):
+
+class ExtendedMenuView(discord.ui.View):
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        ok, msg = check_access(interaction=interaction)
+
+        if not ok:
+            await interaction.response.send_message(
+                msg,
+                ephemeral=True
+            )
+            return False
+
+        return True
+
+    @discord.ui.button(
+        label="Értesítés",
+        style=discord.ButtonStyle.green
+    )
+    async def notify(self, interaction, button):
+        await interaction.response.send_message(
+            "⚙️ Itt lesz majd a célpontválasztó",
+            ephemeral=True
+        )
+
+    @discord.ui.button(
+        label="Ismétlődő",
+        style=discord.ButtonStyle.blurple
+    )
+    async def repeat(self, interaction, button):
+        await interaction.response.send_message(
+            "⚙️ Itt lesz majd a célpontválasztó",
+            ephemeral=True
+        )
+
+    @discord.ui.button(
+        label="Törlés",
+        style=discord.ButtonStyle.red
+    )
+    async def delete(self, interaction, button):
+        data = get_user_data(
+            interaction.guild.id,
+            interaction.user.id
+        )
+
+        if not data:
+            return await interaction.response.send_message(
+                "📭 Nincs adat",
+                ephemeral=True
+            )
+
+        await interaction.response.send_message(
+            "Válassz:",
+            view=DeleteView(data),
+            ephemeral=True
+        )
+
+    @discord.ui.button(
+        label="Lista",
+        style=discord.ButtonStyle.gray
+    )
+    async def list_btn(self, interaction, button):
+        data = get_user_data(
+            interaction.guild.id,
+            interaction.user.id
+        )
+
+        if not data:
+            return await interaction.response.send_message(
+                "📭 Üres",
+                ephemeral=True
+            )
+
+        embed = discord.Embed(
+            title="📋 Lista",
+            color=discord.Color.green()
+        )
+
+        for i, line in enumerate(data[:10]):
+            parts = line.split("|")
+            _, _, _, time_str, msg, repeat = parts
+
+            dt = datetime.fromisoformat(time_str)
+
+            if dt.tzinfo is None:
+                dt = dt.replace(
+                    tzinfo=ZoneInfo("UTC")
+                )
+
+            dt = dt.astimezone(
+                ZoneInfo("Europe/Budapest")
+            )
+
+            embed.add_field(
+                name=f"{i}. {dt.strftime('%m.%d %H:%M')}",
+                value=f"{repeat} | {msg}",
+                inline=False
+            )
+
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=True
+        )
+
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         ok, msg = check_access(interaction=interaction)
         if not ok:
@@ -337,6 +440,33 @@ class MenuView(discord.ui.View):
 # ---------- COMMAND ----------
 @bot.command()
 async def n(ctx):
+
+@bot.command()
+async def e(ctx):
+    ok, msg = check_access(ctx=ctx)
+
+    if not ok:
+        return await ctx.send(msg)
+
+    current, limit, remaining = get_user_limit_info(
+        ctx.author.id
+    )
+
+    embed = discord.Embed(
+        title="📢 Kibővített értesítő",
+        color=discord.Color.gold()
+    )
+
+    embed.add_field(
+        name="📊 Limit",
+        value=f"{current}/{limit} | {remaining} maradt"
+    )
+
+    await ctx.send(
+        embed=embed,
+        view=ExtendedMenuView()
+    )
+
     ok, msg = check_access(ctx=ctx)
     if not ok:
         return await ctx.send(msg)
@@ -351,23 +481,6 @@ async def n(ctx):
 
 
 
-@bot.command()
-async def e(ctx):
-    ok, msg = check_access(ctx=ctx)
-    if not ok:
-        return await ctx.send(msg)
-
-    current, limit, remaining = get_user_limit_info(ctx.author.id)
-
-    embed = discord.Embed(title="📌 Kibővített értesítő", color=discord.Color.gold())
-    embed.add_field(name="📊 Limit", value=f"{current}/{limit} | {remaining} maradt")
-    embed.add_field(
-        name="ℹ️",
-        value="Az !e parancs továbbfejlesztése szükséges a rang/user/@everyone kiválasztó UI teljes működéséhez.",
-        inline=False
-    )
-
-    await ctx.send(embed=embed, view=MenuView())
 
 
 # ---------- AUTO MONEY / TIME ----------
