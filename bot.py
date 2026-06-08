@@ -118,7 +118,7 @@ def check_access(interaction=None, ctx=None):
 # ---------- SCHEDULE ----------
 async def schedule_message(channel, send_time, message, user_id, repeat="once"):
     while True:
-        delay = (send_time - datetime.utcnow()).total_seconds()
+        delay = (send_time - datetime.now(ZoneInfo("UTC"))).total_seconds()
         if delay <= 0:
             delay = 1
 
