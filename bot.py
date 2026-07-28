@@ -445,6 +445,20 @@ async def n(ctx):
     await ctx.send(embed=embed, view=MenuView())
 
 
+@bot.command(name="yt")
+async def yt(ctx):
+    await ctx.send(
+        embed=discord.Embed(
+            title="📺 YouTube",
+            description="Válassz egy YouTube csatornát.",
+            color=discord.Color.red()
+        ),
+        view=YoutubeView()
+    )
+
+
+
+
 # ---------- AUTO MONEY / TIME ----------
 import re
 
