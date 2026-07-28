@@ -616,7 +616,11 @@ Thread(target=lambda: app.run(host="0.0.0.0", port=10000)).start()
 while True:
     try:
         bot.run(DISCORD_TOKEN)
-    except:
+    except Exception as e:
+        print(e)
+        import traceback
+        traceback.print_exc()
+
         import time
         time.sleep(5)
 
