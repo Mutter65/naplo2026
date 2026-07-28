@@ -47,6 +47,20 @@ def load_txt(filename):
         pass
     return []
 
+# ---------- YOUTUBE ----------
+def load_youtube_users():
+    data = load_txt("ytuser.txt")
+
+    users = []
+
+    for line in data:
+        if "|" in line:
+            name, filename = line.split("|", 1)
+            users.append((name.strip(), filename.strip()))
+
+    return users
+
+
 def extract_ids_from_lines(lines):
     return [lines[i] for i in range(1, len(lines), 2) if lines[i].isdigit()]
 
@@ -295,6 +309,57 @@ class DeleteView(discord.ui.View):
     def __init__(self, data):
         super().__init__()
         self.add_item(DeleteSelect(data))
+
+
+
+class YoutubeSelect(discord.ui.Select):
+    def __init__(self):
+
+        users = load_youtube_users()
+
+        options = [
+            discord.SelectOption(
+                label=name,
+                value=filename
+            )
+            for name, filename in users[:25]
+        ]
+
+        super().__init__(
+            placeholder="Válassz YouTube csatornát",
+            options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+
+        filename = self.values[0]
+
+        data = load_txt(f"{filename}.txt")
+
+        if not data:
+            return await interaction.response.send_message(
+                "❌ Nem található adat.",
+                ephemeral=True
+            )
+
+        embed = discord.Embed(
+            title=f"📺 {filename}",
+            description="\n".join(data),
+            color=discord.Color.red()
+        )
+
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=True
+        )
+
+
+class YoutubeView(discord.ui.View):
+
+    def __init__(self):
+        super().__init__()
+        self.add_item(YoutubeSelect())
+
 
 
 class NotifyChoiceView(discord.ui.View):
