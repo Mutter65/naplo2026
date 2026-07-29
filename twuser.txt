@@ -1,2 +1,2 @@
-darkSectorHT|darkSectorHT-T
-Jucus|Jucus-T
+darkSectorHT|TWdarkSector
+Jucus|TWJucus
