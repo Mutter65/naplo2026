@@ -60,9 +60,25 @@ def load_youtube_users():
 
     return users
 
+# ---------- TWITCH ----------
+def load_twitch_users():
+    data = load_txt("twuser.txt")
+
+    users = []
+
+    for line in data:
+        if "|" in line:
+            name, username = line.split("|", 1)
+            users.append((name.strip(), username.strip()))
+
+    return users
+
+
+
 
 def extract_ids_from_lines(lines):
     return [lines[i] for i in range(1, len(lines), 2) if lines[i].isdigit()]
+
 
 # ---------- JOG ----------
 def is_server_allowed(guild_id):
