@@ -371,11 +371,71 @@ super().__init__(
         )
 
 
+
+
+class TwitchSelect(discord.ui.Select):
+
+    def __init__(self):
+
+        users = load_twitch_users()
+
+        options = [
+            discord.SelectOption(
+                label=name,
+                value=filename
+            )
+            for name, filename in users[:25]
+        ]
+
+        super().__init__(
+            custom_id="twitch_select",
+            placeholder="Válassz Twitch csatornát",
+            options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+
+        filename = self.values[0]
+
+        data = load_txt(f"{filename}.txt")
+
+        if not data:
+            return await interaction.response.send_message(
+                "❌ Nem található adat.",
+                ephemeral=True
+            )
+
+        embed = discord.Embed(
+            title=f"🎮 {filename}",
+            description="\n".join(data),
+            color=discord.Color.purple()
+        )
+
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=True
+        )
+
+
+
+
+
 class YoutubeView(discord.ui.View):
 
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(YoutubeSelect())
+
+
+
+
+class TwitchView(discord.ui.View):
+
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(TwitchSelect())
+
+
 
 
 
@@ -474,6 +534,17 @@ async def yt(ctx):
     )
 
 
+
+@bot.command(name="tw")
+async def tw(ctx):
+    await ctx.send(
+        embed=discord.Embed(
+            title="🎮 Twitch",
+            description="Válassz egy Twitch csatornát.",
+            color=discord.Color.purple()
+        ),
+        view=TwitchView()
+    )
 
 
 # ---------- AUTO MONEY / TIME ----------
