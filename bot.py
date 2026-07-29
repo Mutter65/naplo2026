@@ -357,7 +357,7 @@ class YoutubeSelect(discord.ui.Select):
 class YoutubeView(discord.ui.View):
 
     def __init__(self):
-        super().__init__()
+        super().__init__(timeout=None)
         self.add_item(YoutubeSelect())
 
 
