@@ -325,10 +325,11 @@ class YoutubeSelect(discord.ui.Select):
             for name, filename in users[:25]
         ]
 
-        super().__init__(
-            placeholder="Válassz YouTube csatornát",
-            options=options
-        )
+super().__init__(
+    custom_id="youtube_select",
+    placeholder="Válassz YouTube csatornát",
+    options=options
+)
 
     async def callback(self, interaction: discord.Interaction):
 
