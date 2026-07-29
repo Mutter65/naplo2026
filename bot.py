@@ -578,6 +578,7 @@ async def on_message(message):
 # ---------- READY ----------
 @bot.event
 async def on_ready():
+    bot.add_view(YoutubeView())
     print("Bot fut:", bot.user)
 
     for line in load_memory():
