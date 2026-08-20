@@ -558,7 +558,8 @@ class DmModal(discord.ui.Modal, title="dm számítás"):
             embed = discord.Embed(title="🛍️ dm", description="**Pontszámítás**", color=discord.Color.purple())
             embed.add_field(name="💰 Eredeti ára", value=f"**{eredeti:,.0f} HUF**".replace(",", " "), inline=False)
             embed.add_field(name="⭐ Ennyi pontértéket kapsz vissza", value=f"**{pont:,.0f} Pont**".replace(",", " "), inline=False)
-            embed.add_field(name="💵 Ennyit spórolsz", value=f"**{pont:,.0f} HUF**".replace(",", " "), inline=False)
+            sporolas = pont * 3
+            embed.add_field(name="💵 Ennyit spórolsz", value=f"**{sporolas:,.0f} HUF**".replace(",", " "), inline=False)
             embed.set_footer(text=f"dm • {szorzo:g}× pontszorzó • 300 HUF = 1 alap pont")
             await interaction.response.send_message(embed=embed, ephemeral=True)
         except ValueError:
