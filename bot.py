@@ -19,10 +19,9 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 FORTNITE_CHANNEL_ID = int(os.getenv("FORTNITE_CHANNEL_ID", "0"))
 
 FORTNITE_STATUS_URL = "https://status.epicgames.com/api/v2/summary.json"
-FORTNITE_CHECK_INTERVAL = 300  # 5 perc
+FORTNITE_CHECK_INTERVAL = 600  # 10 perc
 
 fortnite_last_state = None
-fortnite_status_message_id = None
 if not DISCORD_TOKEN:
     raise ValueError("❌ DISCORD_TOKEN nincs beállítva!")
 
@@ -839,65 +838,93 @@ def _build_fortnite_embed(status):
     return embed
 
 
-@tasks.loop(seconds=FORTNITE_CHECK_INTERVAL)
-async def fortnite_status_loop():
-    global fortnite_last_state, fortnite_status_message_id
+async def check_fortnite_status():
+    global fortnite_last_state
 
     if not FORTNITE_CHANNEL_ID:
-        print("Fortnite státuszfigyelő: FORTNITE_CHANNEL_ID nincs beállítva.")
+        print("Fortnite státuszfigyelő: FORTNITE_CHANNEL_ID nincs beállítva.", flush=True)
         return
 
-    channel = bot.get_channel(FORTNITE_CHANNEL_ID)
-    if channel is None:
-        try:
+    try:
+        channel = bot.get_channel(FORTNITE_CHANNEL_ID)
+        if channel is None:
             channel = await bot.fetch_channel(FORTNITE_CHANNEL_ID)
-        except Exception as e:
-            print("Fortnite csatorna nem található:", e)
+
+        status = await asyncio.to_thread(_get_fortnite_status)
+        if not status:
+            print("Fortnite státusz: nem sikerült lekérni az Epic API-t.", flush=True)
             return
 
-    status = await asyncio.to_thread(_get_fortnite_status)
-    if not status:
-        return
-
-    embed = _build_fortnite_embed(status)
-
-    # Egyetlen státusz üzenetet tartunk fenn és 5 percenként frissítjük.
-    message = None
-    if fortnite_status_message_id:
-        try:
-            message = await channel.fetch_message(fortnite_status_message_id)
-        except Exception:
-            message = None
-
-    if message is None:
-        message = await channel.send(embed=embed)
-        fortnite_status_message_id = message.id
-    else:
-        await message.edit(embed=embed)
-
-    # Állapotváltozáskor külön értesítés is megy.
-    if fortnite_last_state is not None and status["state"] != fortnite_last_state:
-        if status["state"] == "offline":
-            notify_embed = discord.Embed(
-                title="🔴 Fortnite szerverek leálltak",
-                description="Az Epic Games státuszoldala szerint a Fortnite jelenleg nem érhető el vagy karbantartás alatt áll.",
-                color=discord.Color.red()
+        # Minden ellenőrzéskor teljesen új Discord üzenet készül.
+        embed = _build_fortnite_embed(status)
+        embed.set_footer(
+            text=(
+                "Epic Games Status • Ellenőrzés: "
+                f"{datetime.now(ZoneInfo('Europe/Budapest')).strftime('%H:%M:%S')}"
             )
-        else:
-            notify_embed = discord.Embed(
-                title="🟢 Fortnite szerverek újra ONLINE",
-                description="A Fortnite szerverei ismét elérhetőnek látszanak az Epic Games hivatalos státuszrendszere szerint. 🎮",
-                color=discord.Color.green()
+        )
+        await channel.send(
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions.none()
+        )
+
+        # Állapotváltozáskor külön értesítés.
+        if fortnite_last_state is not None and status["state"] != fortnite_last_state:
+            if status["state"] == "offline":
+                notify_embed = discord.Embed(
+                    title="🔴 Fortnite szerverek leálltak",
+                    description=(
+                        "Az Epic Games státuszoldala szerint a Fortnite "
+                        "jelenleg nem érhető el vagy karbantartás alatt áll."
+                    ),
+                    color=discord.Color.red()
+                )
+            else:
+                notify_embed = discord.Embed(
+                    title="🟢 Fortnite szerverek újra ONLINE",
+                    description=(
+                        "A Fortnite szerverei ismét elérhetőnek látszanak "
+                        "az Epic Games hivatalos státuszrendszere szerint. 🎮"
+                    ),
+                    color=discord.Color.green()
+                )
+
+            notify_embed.set_footer(text="Epic Games Status")
+            await channel.send(
+                embed=notify_embed,
+                allowed_mentions=discord.AllowedMentions.none()
             )
-        notify_embed.set_footer(text="Epic Games Status")
-        await channel.send(embed=notify_embed)
 
-    fortnite_last_state = status["state"]
+        fortnite_last_state = status["state"]
+
+        print(
+            f"Fortnite ellenőrzés kész: {status['state']} | "
+            "következő ellenőrzés 10 perc múlva.",
+            flush=True
+        )
+
+    except Exception as e:
+        print(
+            f"❌ Fortnite státuszfigyelő hiba: {type(e).__name__}: {e}",
+            flush=True
+        )
+        import traceback
+        traceback.print_exc()
 
 
-@fortnite_status_loop.before_loop
-async def before_fortnite_status_loop():
+async def fortnite_status_loop():
     await bot.wait_until_ready()
+
+    # Első ellenőrzés azonnal.
+    await check_fortnite_status()
+
+    # Ezután folyamatosan, 10 percenként.
+    while not bot.is_closed():
+        print("Fortnite státuszfigyelő: várakozás 10 percig...", flush=True)
+        await asyncio.sleep(FORTNITE_CHECK_INTERVAL)
+        print("Fortnite státuszfigyelő: új ellenőrzés indul.", flush=True)
+        await check_fortnite_status()
+
 
 # ---------- READY ----------
 @bot.event
@@ -907,9 +934,14 @@ async def on_ready():
 
     print("Bot fut:", bot.user)
 
-    if FORTNITE_CHANNEL_ID and not fortnite_status_loop.is_running():
-        fortnite_status_loop.start()
-        print("Fortnite státuszfigyelő elindítva (5 perc).")
+    global fortnite_monitor_task
+    if FORTNITE_CHANNEL_ID:
+        if "fortnite_monitor_task" not in globals() or fortnite_monitor_task.done():
+            fortnite_monitor_task = asyncio.create_task(fortnite_status_loop())
+            print(
+                "Fortnite státuszfigyelő elindítva (10 percenként).",
+                flush=True
+            )
 
     for line in load_memory():
         try:
