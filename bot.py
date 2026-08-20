@@ -554,13 +554,17 @@ class DmModal(discord.ui.Modal, title="dm számítás"):
             if eredeti < 0 or szorzo < 0:
                 raise ValueError
 
-            pont = (eredeti / 300) * szorzo
+            # A kapott pontokat először egész pontra kerekítjük/lefelé vágjuk,
+            # és csak az egész pontokat váltjuk át 3 Ft/pont értékre.
+            alap_pont = eredeti / 300
+            pont = int(alap_pont * szorzo)
+            sporolas = pont * 3
+
             embed = discord.Embed(title="🛍️ dm", description="**Pontszámítás**", color=discord.Color.purple())
             embed.add_field(name="💰 Eredeti ára", value=f"**{eredeti:,.0f} HUF**".replace(",", " "), inline=False)
             embed.add_field(name="⭐ Ennyi pontértéket kapsz vissza", value=f"**{pont:,.0f} Pont**".replace(",", " "), inline=False)
-            sporolas = pont * 3
             embed.add_field(name="💵 Ennyit spórolsz", value=f"**{sporolas:,.0f} HUF**".replace(",", " "), inline=False)
-            embed.set_footer(text=f"dm • {szorzo:g}× pontszorzó • 300 HUF = 1 alap pont")
+            embed.set_footer(text=f"dm • {szorzo:g}× pontszorzó • 300 HUF = 1 alap pont • 1 pont = 3 Ft")
             await interaction.response.send_message(embed=embed, ephemeral=True)
         except ValueError:
             await interaction.response.send_message("❌ Kérlek, érvényes számokat adj meg!", ephemeral=True)
