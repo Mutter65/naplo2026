@@ -517,6 +517,85 @@ class MenuView(discord.ui.View):
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+
+# ---------- SPAR / DM CALCULATOR ----------
+class SparModal(discord.ui.Modal, title="SPAR számítás"):
+    ertek = discord.ui.TextInput(label="Érték (HUF)", placeholder="Pl. 3000", required=True, max_length=12)
+    kedvezmeny = discord.ui.TextInput(label="Kedvezmény (%)", placeholder="Pl. 20", required=False, max_length=6)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            eredeti = float(str(self.ertek.value).replace(",", ".").replace(" ", ""))
+            kedvezmeny = float(str(self.kedvezmeny.value).replace(",", ".").replace(" ", "")) if str(self.kedvezmeny.value).strip() else 0
+            if eredeti < 0 or not 0 <= kedvezmeny <= 100:
+                raise ValueError
+            megtakaritas = eredeti * kedvezmeny / 100
+            kedvezmenyes = eredeti - megtakaritas
+
+            embed = discord.Embed(title="🛒 SPAR", description="**Kedvezmény számítása**", color=discord.Color.red())
+            embed.add_field(name="💰 Eredeti ára", value=f"**{eredeti:,.0f} HUF**".replace(",", " "), inline=False)
+            embed.add_field(name="🏷️ Kedvezményes ár", value=f"**{kedvezmenyes:,.0f} HUF**".replace(",", " "), inline=False)
+            embed.add_field(name="💵 Ennyit spórolsz", value=f"**{megtakaritas:,.0f} HUF**".replace(",", " "), inline=False)
+            embed.set_footer(text=f"SPAR • {kedvezmeny:g}% kedvezmény")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("❌ Kérlek, érvényes számokat adj meg! A kedvezmény 0–100% között lehet.", ephemeral=True)
+
+
+class DmModal(discord.ui.Modal, title="dm számítás"):
+    ertek = discord.ui.TextInput(label="Érték (HUF)", placeholder="Pl. 3000", required=True, max_length=12)
+    pont_szorzo = discord.ui.TextInput(label="Pont szorzó (ha van!)", placeholder="Pl. 20", required=False, max_length=8)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            eredeti = float(str(self.ertek.value).replace(",", ".").replace(" ", ""))
+            szorzo_text = str(self.pont_szorzo.value).strip()
+            szorzo = float(szorzo_text.replace(",", ".").replace(" ", "")) if szorzo_text else 1
+            if eredeti < 0 or szorzo < 0:
+                raise ValueError
+
+            pont = (eredeti / 300) * szorzo
+            embed = discord.Embed(title="🛍️ dm", description="**Pontszámítás**", color=discord.Color.purple())
+            embed.add_field(name="💰 Eredeti ára", value=f"**{eredeti:,.0f} HUF**".replace(",", " "), inline=False)
+            embed.add_field(name="⭐ Ennyi pontértéket kapsz vissza", value=f"**{pont:,.0f} Pont**".replace(",", " "), inline=False)
+            embed.add_field(name="💵 Ennyit spórolsz", value=f"**{pont:,.0f} HUF**".replace(",", " "), inline=False)
+            embed.set_footer(text=f"dm • {szorzo:g}× pontszorzó • 300 HUF = 1 alap pont")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("❌ Kérlek, érvényes számokat adj meg!", ephemeral=True)
+
+
+class SparDmView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=300)
+
+    @discord.ui.button(label="SPAR számítás", emoji="🛒", style=discord.ButtonStyle.danger)
+    async def spar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ok, msg = check_access(interaction=interaction)
+        if not ok:
+            return await interaction.response.send_message(msg, ephemeral=True)
+        await interaction.response.send_modal(SparModal())
+
+    @discord.ui.button(label="dm számítás", emoji="🛍️", style=discord.ButtonStyle.primary)
+    async def dm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ok, msg = check_access(interaction=interaction)
+        if not ok:
+            return await interaction.response.send_message(msg, ephemeral=True)
+        await interaction.response.send_modal(DmModal())
+
+
+def build_spar_dm_panel():
+    embed = discord.Embed(
+        title="🧮 SPAR • dm",
+        description="**Válaszd ki, mit szeretnél kiszámolni.**",
+        color=discord.Color.blurple()
+    )
+    embed.add_field(name="🛒  SPAR", value="Érték (HUF) + Kedvezmény (%)", inline=False)
+    embed.add_field(name="🛍️  dm", value="Érték (HUF) + Pont szorzó (ha van!)", inline=False)
+    embed.set_footer(text="A gomb megnyomása után megadhatod az értékeket.")
+    return embed
+
+
 # ---------- COMMAND ----------
 @bot.command()
 async def n(ctx):
@@ -530,6 +609,14 @@ async def n(ctx):
     embed.add_field(name="📊 Limit", value=f"{current}/{limit} | {remaining} maradt")
 
     await ctx.send(embed=embed, view=MenuView())
+
+
+@bot.command(name="dm")
+async def dm(ctx):
+    ok, msg = check_access(ctx=ctx)
+    if not ok:
+        return await ctx.send(msg)
+    await ctx.send(embed=build_spar_dm_panel(), view=SparDmView())
 
 
 @bot.command(name="yt")
