@@ -1,6 +1,8 @@
 import discord
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta
+from html.parser import HTMLParser
+import re
 from zoneinfo import ZoneInfo
 import os
 import requests
@@ -1039,124 +1041,181 @@ async def fortnite_status_loop():
 
 
 # ---------- FORTNITE ITEM SHOP ----------
+
+class _FortniteGGParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.links = []
+        self._href = None
+        self._text = []
+        self._depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() != "a":
+            return
+        attrs = dict(attrs)
+        self._href = attrs.get("href")
+        self._text = []
+
+    def handle_data(self, data):
+        if self._href is not None:
+            self._text.append(data)
+
+    def handle_endtag(self, tag):
+        if tag.lower() != "a" or self._href is None:
+            return
+        text = " ".join(" ".join(self._text).split())
+        self.links.append((self._href, text))
+        self._href = None
+        self._text = []
+
+
+def _clean_fortnite_gg_item_name(text):
+    text = " ".join(str(text).split()).strip()
+
+    # Fortnite.GG item linkek végén az ár szerepel.
+    text = re.sub(r"\s+\d[\d,.]*\s*$", "", text)
+    text = re.sub(r"\s+\$\d+(?:\.\d{1,2})?\s*$", "", text)
+    text = re.sub(r"\s+FREE\s*$", "", text, flags=re.IGNORECASE)
+
+    return text.strip()
+
+
+def _get_fortnite_gg_page(url):
+    response = requests.get(
+        url,
+        timeout=30,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/139.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9"
+        }
+    )
+    response.raise_for_status()
+    return response.text
+
+
+def _parse_fortnite_gg_items(html):
+    parser = _FortniteGGParser()
+    parser.feed(html)
+
+    items = []
+    seen = set()
+
+    for href, text in parser.links:
+        if not href or not text:
+            continue
+
+        # A Fortnite.GG shop item link szövege jellemzően
+        # "Item neve 1,500", "Bundle neve 2,800" vagy "$4.99".
+        # Nem támaszkodunk az URL struktúrájára, mert az oldal ezt
+        # időnként megváltoztatja.
+        if not re.search(
+            r"(?:\d[\d,.]*|\$\d+(?:\.\d{1,2})?|FREE)\s*$",
+            text,
+            flags=re.IGNORECASE
+        ):
+            continue
+
+        name = _clean_fortnite_gg_item_name(text)
+
+        if not name:
+            continue
+
+        # Navigációs / egyéb linkek kiszűrése.
+        blocked = {
+            "shop", "premium", "sign in", "notifications",
+            "filters", "settings", "small", "large"
+        }
+        if name.lower() in blocked:
+            continue
+
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        items.append({
+            "id": href,
+            "name": name
+        })
+
+    return items
+
+
 def _get_fortnite_shop():
     """
-    A Fortnite shopot OFFER/TILE szinten dolgozza fel.
+    Közvetlenül a Fortnite.GG aktuális shopoldalát olvassa.
+    Ez azért fontos, mert így ugyanazt a shop-listát kapjuk,
+    amit a felhasználó a Fortnite.GG oldalon lát.
 
-    Fontos: nem listázza ki egy bundle összes belső cosmetic elemét.
-    Egy shop-entry = egy shop-tile, így a lista sokkal jobban egyezik
-    a Fortnite.GG / játékbeli shop megjelenésével.
+    A Fortnite.GG oldalon a New és LEAVING TODAY jelölések
+    külön is lekérhetők, ezért nem az Epic offer inDate/outDate
+    mezőiből próbáljuk meg kitalálni ezeket.
     """
     try:
-        r = requests.get(
-            FORTNITE_SHOP_URL,
-            timeout=30,
-            headers={"User-Agent": "Darky-Discord-Bot/1.0"}
+        current_html = _get_fortnite_gg_page("https://fortnite.gg/shop")
+        new_html = _get_fortnite_gg_page(
+            "https://fortnite.gg/shop?sort=newest&type=new"
         )
-        r.raise_for_status()
+        leaving_html = _get_fortnite_gg_page(
+            "https://fortnite.gg/shop?sort=newest&type=leaving"
+        )
 
-        payload = r.json()
-        data = payload.get("data", {})
-        entries = data.get("entries", [])
+        current_items = _parse_fortnite_gg_items(current_html)
+        new_items = _parse_fortnite_gg_items(new_html)
+        leaving_items = _parse_fortnite_gg_items(leaving_html)
 
-        if not isinstance(entries, list):
-            print("Fortnite shop: nincs érvényes entries lista.", flush=True)
+        if not current_items:
+            print(
+                "Fortnite.GG: nem sikerült itemeket kinyerni az oldalból.",
+                flush=True
+            )
             return None
 
-        shop_date = str(data.get("date", ""))[:10]
-        if not shop_date:
-            shop_date = datetime.now(ZoneInfo("UTC")).date().isoformat()
+        new_names = {x["name"].casefold() for x in new_items}
+        leaving_names = {x["name"].casefold() for x in leaving_items}
 
         items = []
-        seen_offers = set()
-
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-
-            offer_id = entry.get("offerId")
-            if not offer_id:
-                continue
-
-            offer_id = str(offer_id)
-            if offer_id in seen_offers:
-                continue
-            seen_offers.add(offer_id)
-
-            in_date = str(entry.get("inDate", ""))[:10]
-            out_date = str(entry.get("outDate", ""))[:10]
-
-            # A shop tile elsődleges cosmeticját keressük.
-            display_asset = entry.get("newDisplayAsset") or {}
-            primary_id = display_asset.get("cosmeticId")
-
-            name = None
-
-            # BR offer / bundle
-            br_items = entry.get("brItems", []) or []
-
-            if primary_id:
-                for item in br_items:
-                    if str(item.get("id")) == str(primary_id):
-                        name = item.get("name")
-                        break
-
-            if not name and br_items:
-                # Ha nincs primary ID, az első, shophoz tartozó BR item neve
-                # legyen a tile neve.
-                name = br_items[0].get("name")
-
-            # Festival / Jam Track
-            if not name:
-                tracks = entry.get("tracks", []) or []
-                if tracks:
-                    name = tracks[0].get("title") or tracks[0].get("name")
-
-            # Rocket Racing / Cars
-            if not name:
-                cars = entry.get("cars", []) or []
-                if cars:
-                    name = cars[0].get("name")
-
-            # Utolsó fallback: a devName-ből próbálunk olvasható nevet kinyerni.
-            if not name:
-                dev_name = str(entry.get("devName", "")).strip()
-                if dev_name:
-                    name = dev_name
-                    if name.startswith("[VIRTUAL]"):
-                        name = name.replace("[VIRTUAL]", "", 1).strip()
-                    if name.lower().startswith("1 x "):
-                        name = name[4:]
-                    if " for " in name:
-                        name = name.split(" for ", 1)[0]
-
-            if not name:
-                continue
-
-            name = str(name).strip()
-
+        for item in current_items:
+            name_key = item["name"].casefold()
             items.append({
-                "id": offer_id,
-                "name": name,
-                "new": in_date == shop_date,
-                "leaving": out_date == shop_date,
-                "in_date": in_date,
-                "out_date": out_date,
-                "sort_priority": entry.get("sortPriority", 0),
+                "id": item["id"],
+                "name": item["name"],
+                "new": name_key in new_names,
+                "leaving": name_key in leaving_names
             })
 
-        # A Fortnite shop sorrendjét nagyjából az API sortPriority-ja adja.
-        items.sort(key=lambda x: x.get("sort_priority", 0), reverse=True)
+        # A shop hash-e a név + státusz lista alapján készül.
+        # Így az automata csak akkor postol, ha tényleg változott.
+        state = "|".join(
+            f"{x['name']}:{int(x['new'])}:{int(x['leaving'])}"
+            for x in items
+        )
+        import hashlib
+        shop_hash = hashlib.sha256(state.encode("utf-8")).hexdigest()
+
+        today = datetime.now(ZoneInfo("UTC")).date().isoformat()
+
+        print(
+            f"Fortnite.GG shop: {len(items)} item | "
+            f"új: {len(new_names & {x['name'].casefold() for x in current_items})} | "
+            f"utolsó nap: {len(leaving_names & {x['name'].casefold() for x in current_items})}",
+            flush=True
+        )
 
         return {
-            "hash": data.get("hash") or data.get("date"),
-            "date": shop_date,
+            "hash": shop_hash,
+            "date": today,
             "items": items
         }
 
     except Exception as e:
         print(
-            f"Fortnite shop hiba: {type(e).__name__}: {e}",
+            f"Fortnite.GG shop hiba: {type(e).__name__}: {e}",
             flush=True
         )
         import traceback
