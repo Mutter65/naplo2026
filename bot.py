@@ -587,12 +587,12 @@ class SparDmView(discord.ui.View):
 
 def build_spar_dm_panel():
     embed = discord.Embed(
-        title="🧮 SPAR • dm",
+        title="🧮 SPAR • DM",
         description="**Válaszd ki, mit szeretnél kiszámolni.**",
         color=discord.Color.blurple()
     )
     embed.add_field(name="🛒  SPAR", value="Érték (HUF) + Kedvezmény (%)", inline=False)
-    embed.add_field(name="🛍️  dm", value="Érték (HUF) + Pont szorzó (ha van!)", inline=False)
+    embed.add_field(name="🛍️  DM", value="Érték (HUF) + Pont szorzó (ha van!)", inline=False)
     embed.set_footer(text="A gomb megnyomása után megadhatod az értékeket.")
     return embed
 
