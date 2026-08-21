@@ -1041,181 +1041,131 @@ async def fortnite_status_loop():
 
 
 # ---------- FORTNITE ITEM SHOP ----------
-
-class _FortniteGGParser(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.links = []
-        self._href = None
-        self._text = []
-        self._depth = 0
-
-    def handle_starttag(self, tag, attrs):
-        if tag.lower() != "a":
-            return
-        attrs = dict(attrs)
-        self._href = attrs.get("href")
-        self._text = []
-
-    def handle_data(self, data):
-        if self._href is not None:
-            self._text.append(data)
-
-    def handle_endtag(self, tag):
-        if tag.lower() != "a" or self._href is None:
-            return
-        text = " ".join(" ".join(self._text).split())
-        self.links.append((self._href, text))
-        self._href = None
-        self._text = []
-
-
-def _clean_fortnite_gg_item_name(text):
-    text = " ".join(str(text).split()).strip()
-
-    # Fortnite.GG item linkek végén az ár szerepel.
-    text = re.sub(r"\s+\d[\d,.]*\s*$", "", text)
-    text = re.sub(r"\s+\$\d+(?:\.\d{1,2})?\s*$", "", text)
-    text = re.sub(r"\s+FREE\s*$", "", text, flags=re.IGNORECASE)
-
-    return text.strip()
-
-
-def _get_fortnite_gg_page(url):
-    response = requests.get(
-        url,
-        timeout=30,
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/139.0 Safari/537.36"
-            ),
-            "Accept-Language": "en-US,en;q=0.9"
-        }
-    )
-    response.raise_for_status()
-    return response.text
-
-
-def _parse_fortnite_gg_items(html):
-    parser = _FortniteGGParser()
-    parser.feed(html)
-
-    items = []
-    seen = set()
-
-    for href, text in parser.links:
-        if not href or not text:
-            continue
-
-        # A Fortnite.GG shop item link szövege jellemzően
-        # "Item neve 1,500", "Bundle neve 2,800" vagy "$4.99".
-        # Nem támaszkodunk az URL struktúrájára, mert az oldal ezt
-        # időnként megváltoztatja.
-        if not re.search(
-            r"(?:\d[\d,.]*|\$\d+(?:\.\d{1,2})?|FREE)\s*$",
-            text,
-            flags=re.IGNORECASE
-        ):
-            continue
-
-        name = _clean_fortnite_gg_item_name(text)
-
-        if not name:
-            continue
-
-        # Navigációs / egyéb linkek kiszűrése.
-        blocked = {
-            "shop", "premium", "sign in", "notifications",
-            "filters", "settings", "small", "large"
-        }
-        if name.lower() in blocked:
-            continue
-
-        key = name.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-
-        items.append({
-            "id": href,
-            "name": name
-        })
-
-    return items
-
-
 def _get_fortnite_shop():
     """
-    Közvetlenül a Fortnite.GG aktuális shopoldalát olvassa.
-    Ez azért fontos, mert így ugyanazt a shop-listát kapjuk,
-    amit a felhasználó a Fortnite.GG oldalon lát.
-
-    A Fortnite.GG oldalon a New és LEAVING TODAY jelölések
-    külön is lekérhetők, ezért nem az Epic offer inDate/outDate
-    mezőiből próbáljuk meg kitalálni ezeket.
+    A Fortnite-Datamining aktuális shop snapshotját használjuk.
+    Az entry-k inDate/outDate mezői alapján pontosan megállapítható:
+      - NEW: ma került be
+      - LEAVING: ma jár le
+    Nem kérünk külön Fortnite.GG oldalt, ezért a !fnshop nem akad el
+    egy weboldal/Cloudflare kérés miatt.
     """
     try:
-        current_html = _get_fortnite_gg_page("https://fortnite.gg/shop")
-        new_html = _get_fortnite_gg_page(
-            "https://fortnite.gg/shop?sort=newest&type=new"
+        response = requests.get(
+            FORTNITE_SHOP_URL,
+            timeout=30,
+            headers={"User-Agent": "Darky-Discord-Bot/1.0"}
         )
-        leaving_html = _get_fortnite_gg_page(
-            "https://fortnite.gg/shop?sort=newest&type=leaving"
-        )
+        response.raise_for_status()
 
-        current_items = _parse_fortnite_gg_items(current_html)
-        new_items = _parse_fortnite_gg_items(new_html)
-        leaving_items = _parse_fortnite_gg_items(leaving_html)
+        payload = response.json()
+        data = payload.get("data", {})
+        entries = data.get("entries", [])
 
-        if not current_items:
-            print(
-                "Fortnite.GG: nem sikerült itemeket kinyerni az oldalból.",
-                flush=True
-            )
+        if not isinstance(entries, list):
+            print("Fortnite shop: nincs entries lista.", flush=True)
             return None
 
-        new_names = {x["name"].casefold() for x in new_items}
-        leaving_names = {x["name"].casefold() for x in leaving_items}
+        shop_date = str(data.get("date", ""))[:10]
+        if not shop_date:
+            shop_date = datetime.now(ZoneInfo("UTC")).date().isoformat()
 
         items = []
-        for item in current_items:
-            name_key = item["name"].casefold()
+        seen = set()
+
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+
+            offer_id = entry.get("offerId")
+            if not offer_id:
+                continue
+
+            offer_id = str(offer_id)
+            if offer_id in seen:
+                continue
+            seen.add(offer_id)
+
+            in_date = str(entry.get("inDate", ""))[:10]
+            out_date = str(entry.get("outDate", ""))[:10]
+
+            # Az entry-ben lévő első megjelenő cosmetic neve.
+            # Egy offer/bundle így egyetlen sor marad.
+            name = None
+
+            display_asset = entry.get("newDisplayAsset") or {}
+            primary_id = display_asset.get("cosmeticId")
+
+            br_items = entry.get("brItems", []) or []
+
+            if primary_id:
+                for item in br_items:
+                    if str(item.get("id")) == str(primary_id):
+                        name = item.get("name")
+                        break
+
+            if not name and br_items:
+                name = br_items[0].get("name")
+
+            if not name:
+                tracks = entry.get("tracks", []) or []
+                if tracks:
+                    name = tracks[0].get("title") or tracks[0].get("name")
+
+            if not name:
+                cars = entry.get("cars", []) or []
+                if cars:
+                    name = cars[0].get("name")
+
+            # Ha nincs cosmetic név, a devName-ből készítünk olvasható nevet.
+            if not name:
+                dev_name = str(entry.get("devName", "")).strip()
+                if dev_name:
+                    name = re.sub(
+                        r"^\[VIRTUAL\]\s*1\s*x\s*",
+                        "",
+                        dev_name,
+                        flags=re.IGNORECASE
+                    )
+                    name = re.sub(
+                        r"\s+for\s+\d+\s+MtxCurrency.*$",
+                        "",
+                        name,
+                        flags=re.IGNORECASE
+                    ).strip()
+
+            if not name:
+                continue
+
             items.append({
-                "id": item["id"],
-                "name": item["name"],
-                "new": name_key in new_names,
-                "leaving": name_key in leaving_names
+                "id": offer_id,
+                "name": str(name).strip(),
+                "new": in_date == shop_date,
+                "leaving": out_date == shop_date,
+                "sort_priority": entry.get("sortPriority", 0),
             })
 
-        # A shop hash-e a név + státusz lista alapján készül.
-        # Így az automata csak akkor postol, ha tényleg változott.
-        state = "|".join(
-            f"{x['name']}:{int(x['new'])}:{int(x['leaving'])}"
-            for x in items
-        )
-        import hashlib
-        shop_hash = hashlib.sha256(state.encode("utf-8")).hexdigest()
+        # Shop sorrend.
+        items.sort(key=lambda x: x.get("sort_priority", 0), reverse=True)
 
-        today = datetime.now(ZoneInfo("UTC")).date().isoformat()
+        new_count = sum(1 for x in items if x["new"])
+        leaving_count = sum(1 for x in items if x["leaving"])
 
         print(
-            f"Fortnite.GG shop: {len(items)} item | "
-            f"új: {len(new_names & {x['name'].casefold() for x in current_items})} | "
-            f"utolsó nap: {len(leaving_names & {x['name'].casefold() for x in current_items})}",
+            f"Fortnite shop: {len(items)} ajánlat | "
+            f"NEW: {new_count} | LEAVING: {leaving_count}",
             flush=True
         )
 
         return {
-            "hash": shop_hash,
-            "date": today,
-            "items": items
+            "hash": data.get("hash") or data.get("date"),
+            "date": shop_date,
+            "items": items,
         }
 
     except Exception as e:
         print(
-            f"Fortnite.GG shop hiba: {type(e).__name__}: {e}",
+            f"❌ Fortnite shop lekérési hiba: {type(e).__name__}: {e}",
             flush=True
         )
         import traceback
@@ -1238,20 +1188,19 @@ def _build_fortnite_shop_embed(shop):
         title="🛒 Fortnite Item Shop",
         description=(
             f"**Mai shop • {shop['date']}**\n"
-            f"Összes shop ajánlat: **{len(shop['items'])}**\n\n"
-            "🟢 **Új a mai shopban**\n"
-            "🔴 **Ma utoljára a shopban**\n"
-            "⚪ **Továbbra is elérhető**"
+            f"Összes ajánlat: **{len(shop['items'])}**\n"
+            f"🟢 Új: **{len(new_items)}**  •  "
+            f"🔴 Utolsó nap: **{len(leaving_items)}**"
         ),
         color=discord.Color.blurple(),
         timestamp=datetime.now(ZoneInfo("UTC"))
     )
 
-    def add_section(title, emoji, items):
-        if not items:
+    def add_section(title, emoji, values):
+        if not values:
             return
 
-        lines = [f"{emoji} **{item['name']}**" for item in items]
+        lines = [f"{emoji} **{x['name']}**" for x in values]
         chunk = []
         length = 0
         part = 1
@@ -1282,7 +1231,7 @@ def _build_fortnite_shop_embed(shop):
     add_section("⚪ MAI ITEMEK", "⚪", normal_items)
 
     embed.set_footer(
-        text="Fortnite Item Shop • Automatikus ellenőrzés 10 percenként"
+        text="Fortnite Item Shop • Ellenőrzés 10 percenként"
     )
     return embed
 
@@ -1292,15 +1241,26 @@ async def check_fortnite_shop(force=False, target_channel=None):
 
     if target_channel is None:
         if not FORTNITE_SHOP_CHANNEL_ID:
-            print("Fortnite shop: FORTNITE_SHOP_CHANNEL_ID nincs beállítva.", flush=True)
+            print(
+                "Fortnite shop: FORTNITE_SHOP_CHANNEL_ID nincs beállítva.",
+                flush=True
+            )
             return False
 
         target_channel = bot.get_channel(FORTNITE_SHOP_CHANNEL_ID)
+
         if target_channel is None:
-            target_channel = await bot.fetch_channel(FORTNITE_SHOP_CHANNEL_ID)
+            target_channel = await bot.fetch_channel(
+                FORTNITE_SHOP_CHANNEL_ID
+            )
 
     shop = await asyncio.to_thread(_get_fortnite_shop)
+
     if not shop:
+        if force:
+            await target_channel.send(
+                "❌ A Fortnite Item Shop adatai jelenleg nem érhetők el."
+            )
         return False
 
     if not force and fortnite_shop_last_hash == shop["hash"]:
@@ -1313,16 +1273,29 @@ async def check_fortnite_shop(force=False, target_channel=None):
     )
 
     fortnite_shop_last_hash = shop["hash"]
-    print(f"Fortnite shop elküldve: {len(shop['items'])} item.", flush=True)
+
+    print(
+        f"Fortnite shop post elküldve: {len(shop['items'])} ajánlat.",
+        flush=True
+    )
     return True
 
 
 async def fortnite_shop_loop():
     await bot.wait_until_ready()
+
     await check_fortnite_shop()
 
     while not bot.is_closed():
+        print(
+            "Fortnite shop: várakozás 10 percig...",
+            flush=True
+        )
         await asyncio.sleep(FORTNITE_SHOP_CHECK_INTERVAL)
+        print(
+            "Fortnite shop: új ellenőrzés indul.",
+            flush=True
+        )
         await check_fortnite_shop()
 
 
