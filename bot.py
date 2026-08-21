@@ -1040,6 +1040,13 @@ async def fortnite_status_loop():
 
 # ---------- FORTNITE ITEM SHOP ----------
 def _get_fortnite_shop():
+    """
+    A Fortnite shopot OFFER/TILE szinten dolgozza fel.
+
+    Fontos: nem listázza ki egy bundle összes belső cosmetic elemét.
+    Egy shop-entry = egy shop-tile, így a lista sokkal jobban egyezik
+    a Fortnite.GG / játékbeli shop megjelenésével.
+    """
     try:
         r = requests.get(
             FORTNITE_SHOP_URL,
@@ -1053,7 +1060,7 @@ def _get_fortnite_shop():
         entries = data.get("entries", [])
 
         if not isinstance(entries, list):
-            print("Fortnite shop: az API válasza nem tartalmaz entries listát.", flush=True)
+            print("Fortnite shop: nincs érvényes entries lista.", flush=True)
             return None
 
         shop_date = str(data.get("date", ""))[:10]
@@ -1061,62 +1068,85 @@ def _get_fortnite_shop():
             shop_date = datetime.now(ZoneInfo("UTC")).date().isoformat()
 
         items = []
-        seen = set()
+        seen_offers = set()
 
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
 
+            offer_id = entry.get("offerId")
+            if not offer_id:
+                continue
+
+            offer_id = str(offer_id)
+            if offer_id in seen_offers:
+                continue
+            seen_offers.add(offer_id)
+
             in_date = str(entry.get("inDate", ""))[:10]
             out_date = str(entry.get("outDate", ""))[:10]
 
-            # Egy offer többféle itemtípust is tartalmazhat.
-            nested_items = []
+            # A shop tile elsődleges cosmeticját keressük.
+            display_asset = entry.get("newDisplayAsset") or {}
+            primary_id = display_asset.get("cosmeticId")
 
-            for item in entry.get("brItems", []) or []:
-                nested_items.append((
-                    item.get("id"),
-                    item.get("name")
-                ))
+            name = None
 
-            for track in entry.get("tracks", []) or []:
-                nested_items.append((
-                    track.get("id"),
-                    track.get("title") or track.get("name")
-                ))
+            # BR offer / bundle
+            br_items = entry.get("brItems", []) or []
 
-            for car in entry.get("cars", []) or []:
-                nested_items.append((
-                    car.get("id"),
-                    car.get("name")
-                ))
+            if primary_id:
+                for item in br_items:
+                    if str(item.get("id")) == str(primary_id):
+                        name = item.get("name")
+                        break
 
-            # Ha nincs nested item, ne hagyjuk ki az ajánlatot teljesen.
-            if not nested_items:
-                offer_id = entry.get("offerId")
-                dev_name = entry.get("devName")
-                if offer_id and dev_name:
-                    nested_items.append((offer_id, dev_name))
+            if not name and br_items:
+                # Ha nincs primary ID, az első, shophoz tartozó BR item neve
+                # legyen a tile neve.
+                name = br_items[0].get("name")
 
-            for item_id, name in nested_items:
-                if not item_id or not name:
-                    continue
+            # Festival / Jam Track
+            if not name:
+                tracks = entry.get("tracks", []) or []
+                if tracks:
+                    name = tracks[0].get("title") or tracks[0].get("name")
 
-                item_id = str(item_id)
-                name = str(name).strip()
+            # Rocket Racing / Cars
+            if not name:
+                cars = entry.get("cars", []) or []
+                if cars:
+                    name = cars[0].get("name")
 
-                if item_id in seen:
-                    continue
+            # Utolsó fallback: a devName-ből próbálunk olvasható nevet kinyerni.
+            if not name:
+                dev_name = str(entry.get("devName", "")).strip()
+                if dev_name:
+                    name = dev_name
+                    if name.startswith("[VIRTUAL]"):
+                        name = name.replace("[VIRTUAL]", "", 1).strip()
+                    if name.lower().startswith("1 x "):
+                        name = name[4:]
+                    if " for " in name:
+                        name = name.split(" for ", 1)[0]
 
-                seen.add(item_id)
+            if not name:
+                continue
 
-                items.append({
-                    "id": item_id,
-                    "name": name,
-                    # Az API-ban ez közvetlenül rendelkezésre áll.
-                    "new": in_date == shop_date,
-                    "leaving": out_date == shop_date
-                })
+            name = str(name).strip()
+
+            items.append({
+                "id": offer_id,
+                "name": name,
+                "new": in_date == shop_date,
+                "leaving": out_date == shop_date,
+                "in_date": in_date,
+                "out_date": out_date,
+                "sort_priority": entry.get("sortPriority", 0),
+            })
+
+        # A Fortnite shop sorrendjét nagyjából az API sortPriority-ja adja.
+        items.sort(key=lambda x: x.get("sort_priority", 0), reverse=True)
 
         return {
             "hash": data.get("hash") or data.get("date"),
@@ -1125,7 +1155,10 @@ def _get_fortnite_shop():
         }
 
     except Exception as e:
-        print(f"Fortnite shop hiba: {type(e).__name__}: {e}", flush=True)
+        print(
+            f"Fortnite shop hiba: {type(e).__name__}: {e}",
+            flush=True
+        )
         import traceback
         traceback.print_exc()
         return None
@@ -1133,7 +1166,10 @@ def _get_fortnite_shop():
 
 def _build_fortnite_shop_embed(shop):
     new_items = [x for x in shop["items"] if x["new"]]
-    leaving_items = [x for x in shop["items"] if x["leaving"] and not x["new"]]
+    leaving_items = [
+        x for x in shop["items"]
+        if x["leaving"] and not x["new"]
+    ]
     normal_items = [
         x for x in shop["items"]
         if not x["new"] and not x["leaving"]
@@ -1142,7 +1178,8 @@ def _build_fortnite_shop_embed(shop):
     embed = discord.Embed(
         title="🛒 Fortnite Item Shop",
         description=(
-            f"**Mai shop • {shop['date']}**\n\n"
+            f"**Mai shop • {shop['date']}**\n"
+            f"Összes shop ajánlat: **{len(shop['items'])}**\n\n"
             "🟢 **Új a mai shopban**\n"
             "🔴 **Ma utoljára a shopban**\n"
             "⚪ **Továbbra is elérhető**"
