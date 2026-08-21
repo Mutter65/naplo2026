@@ -25,7 +25,7 @@ FORTNITE_CHECK_INTERVAL = 600  # 10 perc
 # .env: FORTNITE_SHOP_CHANNEL_ID=123456789012345678
 FORTNITE_SHOP_CHANNEL_ID = int(os.getenv("FORTNITE_SHOP_CHANNEL_ID", "0"))
 FORTNITE_SHOP_CHECK_INTERVAL = 600  # 10 perc
-FORTNITE_SHOP_URL = "https://fortnite-api.com/v2/shop"
+FORTNITE_SHOP_URL = "https://raw.githubusercontent.com/Fortnite-Datamining/Fortnite-Datamining/main/data/shop/current.json"
 
 fortnite_last_state = None
 fortnite_shop_last_hash = None
@@ -1043,84 +1043,119 @@ def _get_fortnite_shop():
     try:
         r = requests.get(
             FORTNITE_SHOP_URL,
-            params={"language": "en"},
-            timeout=20,
+            timeout=30,
             headers={"User-Agent": "Darky-Discord-Bot/1.0"}
         )
         r.raise_for_status()
-        data = r.json().get("data", {})
+
+        payload = r.json()
+        data = payload.get("data", {})
+        entries = data.get("entries", [])
+
+        if not isinstance(entries, list):
+            print("Fortnite shop: az API válasza nem tartalmaz entries listát.", flush=True)
+            return None
+
+        shop_date = str(data.get("date", ""))[:10]
+        if not shop_date:
+            shop_date = datetime.now(ZoneInfo("UTC")).date().isoformat()
 
         items = []
         seen = set()
 
-        for category in (
-            "featured", "daily", "specialFeatured",
-            "specialDaily", "votes", "voteWinners"
-        ):
-            block = data.get(category)
-            if not isinstance(block, dict):
+        for entry in entries:
+            if not isinstance(entry, dict):
                 continue
 
-            for entry in block.get("entries", []):
-                for item in entry.get("items", []) or []:
-                    item_id = item.get("id")
-                    name = item.get("name")
-                    if not item_id or not name:
-                        continue
+            in_date = str(entry.get("inDate", ""))[:10]
+            out_date = str(entry.get("outDate", ""))[:10]
 
-                    item_id = str(item_id)
-                    if item_id in seen:
-                        continue
+            # Egy offer többféle itemtípust is tartalmazhat.
+            nested_items = []
 
-                    seen.add(item_id)
-                    items.append({
-                        "id": item_id,
-                        "name": str(name).strip()
-                    })
+            for item in entry.get("brItems", []) or []:
+                nested_items.append((
+                    item.get("id"),
+                    item.get("name")
+                ))
 
-        if not items:
-            for entry in data.get("entries", []) or []:
-                for item in entry.get("items", []) or []:
-                    item_id = item.get("id")
-                    name = item.get("name")
-                    if not item_id or not name:
-                        continue
-                    item_id = str(item_id)
-                    if item_id in seen:
-                        continue
-                    seen.add(item_id)
-                    items.append({
-                        "id": item_id,
-                        "name": str(name).strip()
-                    })
+            for track in entry.get("tracks", []) or []:
+                nested_items.append((
+                    track.get("id"),
+                    track.get("title") or track.get("name")
+                ))
+
+            for car in entry.get("cars", []) or []:
+                nested_items.append((
+                    car.get("id"),
+                    car.get("name")
+                ))
+
+            # Ha nincs nested item, ne hagyjuk ki az ajánlatot teljesen.
+            if not nested_items:
+                offer_id = entry.get("offerId")
+                dev_name = entry.get("devName")
+                if offer_id and dev_name:
+                    nested_items.append((offer_id, dev_name))
+
+            for item_id, name in nested_items:
+                if not item_id or not name:
+                    continue
+
+                item_id = str(item_id)
+                name = str(name).strip()
+
+                if item_id in seen:
+                    continue
+
+                seen.add(item_id)
+
+                items.append({
+                    "id": item_id,
+                    "name": name,
+                    # Az API-ban ez közvetlenül rendelkezésre áll.
+                    "new": in_date == shop_date,
+                    "leaving": out_date == shop_date
+                })
 
         return {
             "hash": data.get("hash") or data.get("date"),
-            "date": str(data.get("date", ""))[:10],
+            "date": shop_date,
             "items": items
         }
 
     except Exception as e:
-        print("Fortnite shop hiba:", e, flush=True)
+        print(f"Fortnite shop hiba: {type(e).__name__}: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
         return None
 
 
 def _build_fortnite_shop_embed(shop):
+    new_items = [x for x in shop["items"] if x["new"]]
+    leaving_items = [x for x in shop["items"] if x["leaving"] and not x["new"]]
+    normal_items = [
+        x for x in shop["items"]
+        if not x["new"] and not x["leaving"]
+    ]
+
     embed = discord.Embed(
         title="🛒 Fortnite Item Shop",
         description=(
-            f"**Mai shop • {shop.get('date') or '—'}**\n\n"
-            "⚪ Az aktuális shop itemjei"
+            f"**Mai shop • {shop['date']}**\n\n"
+            "🟢 **Új a mai shopban**\n"
+            "🔴 **Ma utoljára a shopban**\n"
+            "⚪ **Továbbra is elérhető**"
         ),
         color=discord.Color.blurple(),
         timestamp=datetime.now(ZoneInfo("UTC"))
     )
 
-    lines = [f"⚪ **{item['name']}**" for item in shop["items"]]
+    def add_section(title, emoji, items):
+        if not items:
+            return
 
-    if not lines:
-        embed.description += "\n\nNem sikerült itemeket találni."
-    else:
+        lines = [f"{emoji} **{item['name']}**" for item in items]
         chunk = []
         length = 0
         part = 1
@@ -1128,7 +1163,7 @@ def _build_fortnite_shop_embed(shop):
         for line in lines:
             if length + len(line) + 1 > 1000:
                 embed.add_field(
-                    name="🛍️ Mai itemek" if part == 1 else f"🛍️ Mai itemek • {part}",
+                    name=title if part == 1 else f"{title} • {part}",
                     value="\n".join(chunk),
                     inline=False
                 )
@@ -1141,12 +1176,18 @@ def _build_fortnite_shop_embed(shop):
 
         if chunk:
             embed.add_field(
-                name="🛍️ Mai itemek" if part == 1 else f"🛍️ Mai itemek • {part}",
+                name=title if part == 1 else f"{title} • {part}",
                 value="\n".join(chunk),
                 inline=False
             )
 
-    embed.set_footer(text="Fortnite Item Shop • Automatikus ellenőrzés 10 percenként")
+    add_section("🟢 ÚJ ITEMEK", "🟢", new_items)
+    add_section("🔴 UTOLSÓ NAP", "🔴", leaving_items)
+    add_section("⚪ MAI ITEMEK", "⚪", normal_items)
+
+    embed.set_footer(
+        text="Fortnite Item Shop • Automatikus ellenőrzés 10 percenként"
+    )
     return embed
 
 
