@@ -612,7 +612,7 @@ async def n(ctx):
     await ctx.send(embed=embed, view=MenuView())
 
 
-@bot.command(name="DM")
+@bot.command(name="dm")
 async def dm(ctx):
     ok, msg = check_access(ctx=ctx)
     if not ok:
