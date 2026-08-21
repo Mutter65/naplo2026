@@ -24,10 +24,8 @@ FORTNITE_CHECK_INTERVAL = 600  # 10 perc
 # ---------- FORTNITE ITEM SHOP ----------
 # .env: FORTNITE_SHOP_CHANNEL_ID=123456789012345678
 FORTNITE_SHOP_CHANNEL_ID = int(os.getenv("FORTNITE_SHOP_CHANNEL_ID", "0"))
-FORTNITE_SHOP_URL = "https://fortnite-api.com/v2/shop"
-FORTNITE_GG_SHOP_URL = "https://fortnite.gg/shop"
-FORTNITE_GG_LEAVING_URL = "https://fortnite.gg/shop?type=leaving"
 FORTNITE_SHOP_CHECK_INTERVAL = 600  # 10 perc
+FORTNITE_SHOP_URL = "https://fortnite-api.com/v2/shop"
 
 fortnite_last_state = None
 fortnite_shop_last_hash = None
@@ -563,13 +561,17 @@ class DmModal(discord.ui.Modal, title="DM számítás"):
             if eredeti < 0 or szorzo < 0:
                 raise ValueError
 
-            pont = (eredeti / 300) * szorzo
+            # A kapott pontokat először egész pontra kerekítjük/lefelé vágjuk,
+            # és csak az egész pontokat váltjuk át 3 Ft/pont értékre.
+            alap_pont = eredeti / 300
+            pont = int(alap_pont * szorzo)
+            sporolas = pont * 3
+
             embed = discord.Embed(title="🛍️ DM", description="**Pontszámítás**", color=discord.Color.purple())
             embed.add_field(name="💰 Eredeti ára", value=f"**{eredeti:,.0f} HUF**".replace(",", " "), inline=False)
             embed.add_field(name="⭐ Ennyi pontértéket kapsz vissza", value=f"**{pont:,.0f} Pont**".replace(",", " "), inline=False)
-            sporolas = pont * 3
             embed.add_field(name="💵 Ennyit spórolsz", value=f"**{sporolas:,.0f} HUF**".replace(",", " "), inline=False)
-            embed.set_footer(text=f"DM • {szorzo:g}× pontszorzó • 300 HUF = 1 alap pont")
+            embed.set_footer(text=f"DM • {szorzo:g}× pontszorzó • 300 HUF = 1 alap pont • 1 pont = 3 Ft")
             await interaction.response.send_message(embed=embed, ephemeral=True)
         except ValueError:
             await interaction.response.send_message("❌ Kérlek, érvényes számokat adj meg!", ephemeral=True)
@@ -621,7 +623,7 @@ async def n(ctx):
     await ctx.send(embed=embed, view=MenuView())
 
 
-@bot.command(name="DM")
+@bot.command(name="dm")
 async def dm(ctx):
     ok, msg = check_access(ctx=ctx)
     if not ok:
@@ -635,13 +637,10 @@ async def fnshop(ctx):
     if not ok:
         return await ctx.send(msg)
 
-    if not FORTNITE_SHOP_CHANNEL_ID:
-        return await ctx.send(
-            "❌ A Fortnite shop csatorna nincs beállítva a FORTNITE_SHOP_CHANNEL_ID változóban."
-        )
-
-    # Kézi lekéréskor abba a csatornába küldjük, ahol a !fnshop parancsot kiadták.
-    await check_fortnite_shop(channel=ctx.channel, force=True)
+    await check_fortnite_shop(
+        force=True,
+        target_channel=ctx.channel
+    )
 
 
 @bot.command(name="yt")
@@ -1039,358 +1038,155 @@ async def fortnite_status_loop():
 
 
 
-# ---------- FORTNITE ITEM SHOP MONITOR ----------
-def _normalize_shop_name(name):
-    return " ".join(str(name).lower().split()).strip()
-
-
+# ---------- FORTNITE ITEM SHOP ----------
 def _get_fortnite_shop():
-    """Lekéri a jelenlegi Fortnite Item Shopot."""
     try:
-        response = requests.get(
+        r = requests.get(
             FORTNITE_SHOP_URL,
             params={"language": "en"},
             timeout=20,
-            headers={"User-Agent": "Mozilla/5.0"}
+            headers={"User-Agent": "Darky-Discord-Bot/1.0"}
         )
-        response.raise_for_status()
-        data = response.json()
+        r.raise_for_status()
+        data = r.json().get("data", {})
 
-        shop = data.get("data", {})
-        entries = []
+        items = []
+        seen = set()
 
-        # A v2/shop endpointen a fő kategóriákból összegyűjtjük az ajánlatokat.
         for category in (
-            "featured",
-            "daily",
-            "specialFeatured",
-            "specialDaily",
-            "votes",
-            "voteWinners"
+            "featured", "daily", "specialFeatured",
+            "specialDaily", "votes", "voteWinners"
         ):
-            value = shop.get(category)
-            if not isinstance(value, dict):
+            block = data.get(category)
+            if not isinstance(block, dict):
                 continue
 
-            category_entries = value.get("entries", [])
-            if isinstance(category_entries, list):
-                entries.extend(category_entries)
-
-        # Egyes API-változatok közvetlen entries tömböt adnak.
-        if not entries and isinstance(shop.get("entries"), list):
-            entries = shop["entries"]
-
-        unique = {}
-        for entry in entries:
-            items = entry.get("items") or []
-            if items:
-                # Egy ajánlatban több cosmetic is lehet; az ajánlat neve
-                # helyett a benne lévő itemeket listázzuk.
-                for item in items:
-                    item_id = item.get("id") or item.get("name")
+            for entry in block.get("entries", []):
+                for item in entry.get("items", []) or []:
+                    item_id = item.get("id")
                     name = item.get("name")
-                    if item_id and name:
-                        unique[str(item_id)] = {
-                            "id": str(item_id),
-                            "name": str(name),
-                            "price": entry.get("finalPrice", entry.get("regularPrice")),
-                            "offer_id": entry.get("offerId")
-                        }
-            else:
-                name = entry.get("devName") or entry.get("name")
-                item_id = entry.get("offerId") or name
-                if item_id and name:
-                    unique[str(item_id)] = {
-                        "id": str(item_id),
-                        "name": str(name),
-                        "price": entry.get("finalPrice", entry.get("regularPrice")),
-                        "offer_id": entry.get("offerId")
-                    }
+                    if not item_id or not name:
+                        continue
+
+                    item_id = str(item_id)
+                    if item_id in seen:
+                        continue
+
+                    seen.add(item_id)
+                    items.append({
+                        "id": item_id,
+                        "name": str(name).strip()
+                    })
+
+        if not items:
+            for entry in data.get("entries", []) or []:
+                for item in entry.get("items", []) or []:
+                    item_id = item.get("id")
+                    name = item.get("name")
+                    if not item_id or not name:
+                        continue
+                    item_id = str(item_id)
+                    if item_id in seen:
+                        continue
+                    seen.add(item_id)
+                    items.append({
+                        "id": item_id,
+                        "name": str(name).strip()
+                    })
 
         return {
-            "date": shop.get("date"),
-            "hash": shop.get("hash"),
-            "items": list(unique.values())
+            "hash": data.get("hash") or data.get("date"),
+            "date": str(data.get("date", ""))[:10],
+            "items": items
         }
 
     except Exception as e:
-        print("Fortnite shop API hiba:", e, flush=True)
+        print("Fortnite shop hiba:", e, flush=True)
         return None
 
 
-def _get_fortnite_gg_leaving_names():
-    """
-    A Fortnite.GG 'Leaving Today' listáját használjuk a piros jelöléshez.
-    A Fortnite-API jelenlegi shopot ad, míg a Fortnite.GG külön jelzi
-    azokat, amelyek aznap távoznak.
-    """
-    try:
-        response = requests.get(
-            FORTNITE_GG_LEAVING_URL,
-            timeout=20,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 Chrome/151.0 Safari/537.36"
-                )
-            }
-        )
-        response.raise_for_status()
-
-        # A shopoldal szövegesen is tartalmazza a "LEAVING TODAY" jelölést.
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(response.text, "html.parser")
-        lines = [
-            " ".join(line.split())
-            for line in soup.get_text("\n").splitlines()
-            if line.strip()
-        ]
-
-        leaving = set()
-
-        for index, line in enumerate(lines):
-            if line.upper() == "LEAVING TODAY":
-                # A jelölés után jellemzően az item neve, majd az ára következik.
-                for candidate in lines[index + 1:index + 5]:
-                    if not candidate:
-                        continue
-                    # Ár, emoji, navigációs szöveg és hasonló sorokat kihagyunk.
-                    if candidate.upper() == "LEAVING TODAY":
-                        continue
-                    if candidate.replace(",", "").replace(".", "").isdigit():
-                        continue
-                    if candidate.startswith(("🔥", "😍", "😐", "🤮", "💩")):
-                        continue
-                    if len(candidate) <= 120:
-                        leaving.add(_normalize_shop_name(candidate))
-                        break
-
-        return leaving
-
-    except Exception as e:
-        print("Fortnite.GG Leaving Today hiba:", e, flush=True)
-        return set()
-
-
-def _build_fortnite_shop_embed(shop, leaving_names):
-    items = shop.get("items", [])
-    if not items:
-        return None
-
-    today_utc = datetime.now(ZoneInfo("UTC")).date().isoformat()
-
-    new_items = []
-    leaving_items = []
-    normal_items = []
-    seen = set()
-
-    for item in items:
-        name = item.get("name", "").strip()
-        normalized = _normalize_shop_name(name)
-
-        if not name or normalized in seen:
-            continue
-        seen.add(normalized)
-
-        if normalized in leaving_names:
-            leaving_items.append(f"🔴 **{name}**")
-        elif item.get("new_today"):
-            new_items.append(f"🟢 **{name}**")
-        else:
-            normal_items.append(f"⚪ **{name}**")
-
+def _build_fortnite_shop_embed(shop):
     embed = discord.Embed(
         title="🛒 Fortnite Item Shop",
         description=(
-            f"**Mai shop • {today_utc}**\n\n"
-            "🟢 **Új a mai shopban**\n"
-            "🔴 **Ma utoljára a shopban**\n"
-            "⚪ **Továbbra is elérhető**"
+            f"**Mai shop • {shop.get('date') or '—'}**\n\n"
+            "⚪ Az aktuális shop itemjei"
         ),
         color=discord.Color.blurple(),
         timestamp=datetime.now(ZoneInfo("UTC"))
     )
 
-    def add_chunks(title, values, emoji):
-        if not values:
-            return
+    lines = [f"⚪ **{item['name']}**" for item in shop["items"]]
 
+    if not lines:
+        embed.description += "\n\nNem sikerült itemeket találni."
+    else:
         chunk = []
         length = 0
         part = 1
 
-        for value in values:
-            if length + len(value) + 1 > 1000:
-                field_name = title if part == 1 else f"{title} • {part}"
+        for line in lines:
+            if length + len(line) + 1 > 1000:
                 embed.add_field(
-                    name=field_name,
+                    name="🛍️ Mai itemek" if part == 1 else f"🛍️ Mai itemek • {part}",
                     value="\n".join(chunk),
                     inline=False
                 )
-                part += 1
                 chunk = []
                 length = 0
+                part += 1
 
-            chunk.append(value)
-            length += len(value) + 1
+            chunk.append(line)
+            length += len(line) + 1
 
         if chunk:
-            field_name = title if part == 1 else f"{title} • {part}"
             embed.add_field(
-                name=field_name,
+                name="🛍️ Mai itemek" if part == 1 else f"🛍️ Mai itemek • {part}",
                 value="\n".join(chunk),
                 inline=False
             )
 
-    add_chunks("🟢 ÚJ ITEMEK", new_items, "🟢")
-    add_chunks("🔴 UTOLSÓ NAP", leaving_items, "🔴")
-    add_chunks("⚪ MAI ITEMEK", normal_items, "⚪")
-
-    embed.set_footer(
-        text="Fortnite Item Shop • Automatikus ellenőrzés 10 percenként"
-    )
+    embed.set_footer(text="Fortnite Item Shop • Automatikus ellenőrzés 10 percenként")
     return embed
 
 
-
-
-async def _prepare_fortnite_shop():
-    shop = await asyncio.to_thread(_get_fortnite_shop)
-    if not shop:
-        return None
-
-    leaving_names = await asyncio.to_thread(_get_fortnite_gg_leaving_names)
-
-    today = datetime.now(ZoneInfo("UTC")).date().isoformat()
-    yesterday = (
-        datetime.now(ZoneInfo("UTC")).date() - timedelta(days=1)
-    ).isoformat()
-
-    # Egyetlen cosmetics lekérésből megkapjuk a shopHistory adatokat,
-    # így nem kell itemenként külön API-kérést küldeni.
-    try:
-        response = await asyncio.to_thread(
-            requests.get,
-            "https://fortnite-api.com/v2/cosmetics/br",
-            params={"language": "en"},
-            timeout=30,
-            headers={"User-Agent": "Mozilla/5.0"}
-        )
-        response.raise_for_status()
-        cosmetics = response.json().get("data", [])
-
-        by_id = {
-            str(item.get("id")): item
-            for item in cosmetics
-            if item.get("id")
-        }
-
-        for item in shop["items"]:
-            cosmetic = by_id.get(str(item["id"]))
-            if not cosmetic:
-                item["new_today"] = False
-                continue
-
-            history = cosmetic.get("shopHistory") or []
-            history_dates = {
-                str(x)[:10]
-                for x in history
-                if isinstance(x, str)
-            }
-
-            item["new_today"] = (
-                today in history_dates and
-                yesterday not in history_dates
-            )
-
-    except Exception as e:
-        print("Fortnite cosmetics/history hiba:", e, flush=True)
-        for item in shop["items"]:
-            item["new_today"] = False
-
-    return shop, leaving_names
-
-
-
-
-def _send_fortnite_shop(channel):
-    # Segédfüggvény csak a fetch/send folyamat elkülönítésére.
-    return channel
-
-
-async def check_fortnite_shop(channel=None, force=False):
+async def check_fortnite_shop(force=False, target_channel=None):
     global fortnite_shop_last_hash
 
-    if channel is None:
+    if target_channel is None:
         if not FORTNITE_SHOP_CHANNEL_ID:
-            print(
-                "Fortnite shop: FORTNITE_SHOP_CHANNEL_ID nincs beállítva.",
-                flush=True
-            )
+            print("Fortnite shop: FORTNITE_SHOP_CHANNEL_ID nincs beállítva.", flush=True)
             return False
 
-        channel = bot.get_channel(FORTNITE_SHOP_CHANNEL_ID)
-        if channel is None:
-            channel = await bot.fetch_channel(FORTNITE_SHOP_CHANNEL_ID)
+        target_channel = bot.get_channel(FORTNITE_SHOP_CHANNEL_ID)
+        if target_channel is None:
+            target_channel = await bot.fetch_channel(FORTNITE_SHOP_CHANNEL_ID)
 
-    try:
-        prepared = await _prepare_fortnite_shop()
-        if not prepared:
-            print("Fortnite shop: nem sikerült lekérni a shopot.", flush=True)
-            return False
-
-        shop, leaving_names = prepared
-
-        # Automatikus figyelésnél csak valódi shopváltáskor postolunk.
-        # A !fnshop parancs force=True esetén mindig küld.
-        if not force and shop.get("hash") and shop["hash"] == fortnite_shop_last_hash:
-            print("Fortnite shop: nincs változás.", flush=True)
-            return False
-
-        embed = _build_fortnite_shop_embed(shop, leaving_names)
-        if not embed:
-            return False
-
-        await channel.send(
-            embed=embed,
-            allowed_mentions=discord.AllowedMentions.none()
-        )
-
-        fortnite_shop_last_hash = shop.get("hash") or datetime.now(
-            ZoneInfo("UTC")
-        ).isoformat()
-
-        print(
-            f"Fortnite shop post elküldve: {len(shop['items'])} item.",
-            flush=True
-        )
-        return True
-
-    except Exception as e:
-        print(
-            f"❌ Fortnite shop hiba: {type(e).__name__}: {e}",
-            flush=True
-        )
-        import traceback
-        traceback.print_exc()
+    shop = await asyncio.to_thread(_get_fortnite_shop)
+    if not shop:
         return False
 
+    if not force and fortnite_shop_last_hash == shop["hash"]:
+        print("Fortnite shop: nincs változás.", flush=True)
+        return False
 
+    await target_channel.send(
+        embed=_build_fortnite_shop_embed(shop),
+        allowed_mentions=discord.AllowedMentions.none()
+    )
+
+    fortnite_shop_last_hash = shop["hash"]
+    print(f"Fortnite shop elküldve: {len(shop['items'])} item.", flush=True)
+    return True
 
 
 async def fortnite_shop_loop():
     await bot.wait_until_ready()
-
-    # Első automatikus shop-post azonnal.
     await check_fortnite_shop()
 
     while not bot.is_closed():
-        print("Fortnite shop: várakozás 10 percig...", flush=True)
         await asyncio.sleep(FORTNITE_SHOP_CHECK_INTERVAL)
-        print("Fortnite shop: új ellenőrzés indul.", flush=True)
         await check_fortnite_shop()
-
-
 
 
 # ---------- READY ----------
@@ -1402,7 +1198,6 @@ async def on_ready():
     print("Bot fut:", bot.user)
 
     global fortnite_monitor_task, fortnite_shop_monitor_task
-
     if FORTNITE_CHANNEL_ID:
         if "fortnite_monitor_task" not in globals() or fortnite_monitor_task.done():
             fortnite_monitor_task = asyncio.create_task(fortnite_status_loop())
