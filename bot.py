@@ -542,7 +542,7 @@ class SparModal(discord.ui.Modal, title="SPAR számítás"):
             await interaction.response.send_message("❌ Kérlek, érvényes számokat adj meg! A kedvezmény 0–100% között lehet.", ephemeral=True)
 
 
-class DmModal(discord.ui.Modal, title="dm számítás"):
+class DmModal(discord.ui.Modal, title="DM számítás"):
     ertek = discord.ui.TextInput(label="Érték (HUF)", placeholder="Pl. 3000", required=True, max_length=12)
     pont_szorzo = discord.ui.TextInput(label="Pont szorzó (ha van!)", placeholder="Pl. 20", required=False, max_length=8)
 
@@ -560,11 +560,11 @@ class DmModal(discord.ui.Modal, title="dm számítás"):
             pont = int(alap_pont * szorzo)
             sporolas = pont * 3
 
-            embed = discord.Embed(title="🛍️ dm", description="**Pontszámítás**", color=discord.Color.purple())
+            embed = discord.Embed(title="🛍️ DM", description="**Pontszámítás**", color=discord.Color.purple())
             embed.add_field(name="💰 Eredeti ára", value=f"**{eredeti:,.0f} HUF**".replace(",", " "), inline=False)
             embed.add_field(name="⭐ Ennyi pontértéket kapsz vissza", value=f"**{pont:,.0f} Pont**".replace(",", " "), inline=False)
             embed.add_field(name="💵 Ennyit spórolsz", value=f"**{sporolas:,.0f} HUF**".replace(",", " "), inline=False)
-            embed.set_footer(text=f"dm • {szorzo:g}× pontszorzó • 300 HUF = 1 alap pont • 1 pont = 3 Ft")
+            embed.set_footer(text=f"DM • {szorzo:g}× pontszorzó • 300 HUF = 1 alap pont • 1 pont = 3 HUF")
             await interaction.response.send_message(embed=embed, ephemeral=True)
         except ValueError:
             await interaction.response.send_message("❌ Kérlek, érvényes számokat adj meg!", ephemeral=True)
@@ -581,7 +581,7 @@ class SparDmView(discord.ui.View):
             return await interaction.response.send_message(msg, ephemeral=True)
         await interaction.response.send_modal(SparModal())
 
-    @discord.ui.button(label="dm számítás", emoji="🛍️", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="DM számítás", emoji="🛍️", style=discord.ButtonStyle.primary)
     async def dm(self, interaction: discord.Interaction, button: discord.ui.Button):
         ok, msg = check_access(interaction=interaction)
         if not ok:
@@ -616,7 +616,7 @@ async def n(ctx):
     await ctx.send(embed=embed, view=MenuView())
 
 
-@bot.command(name="dm")
+@bot.command(name="DM")
 async def dm(ctx):
     ok, msg = check_access(ctx=ctx)
     if not ok:
