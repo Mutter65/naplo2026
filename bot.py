@@ -520,10 +520,10 @@ class MenuView(discord.ui.View):
 
 
 # ---------- JEGYZET ----------
-class JegyzetModal(discord.ui.Modal, title="📝 Új jegyzet"):
+class JegyzetModal(discord.ui.Modal, title="📝 Új TXT"):
     jegyzet = discord.ui.TextInput(
-        label="Jegyzet",
-        placeholder="Írd ide a jegyzeted szövegét...",
+        label="TXT tartalma",
+        placeholder="Írd ide a szöveget...",
         style=discord.TextStyle.paragraph,
         required=True,
         max_length=4000
@@ -532,47 +532,75 @@ class JegyzetModal(discord.ui.Modal, title="📝 Új jegyzet"):
     async def on_submit(self, interaction: discord.Interaction):
         ok, msg = check_access(interaction=interaction)
         if not ok:
+            return await interaction.response.send_message(msg, ephemeral=True)
+
+        text_content = str(self.jegyzet.value).strip()
+        if not text_content:
             return await interaction.response.send_message(
-                msg,
+                "❌ A TXT nem lehet üres.",
                 ephemeral=True
             )
 
-        text = str(self.jegyzet.value).strip()
-
-        if not text:
-            return await interaction.response.send_message(
-                "❌ A jegyzet nem lehet üres.",
-                ephemeral=True
-            )
-
-        now = datetime.now(ZoneInfo("Europe/Budapest"))
-        filename = f"jegyzet_{now.strftime('%Y%m%d_%H%M%S')}.txt"
-
-        # UTF-8 TXT létrehozása memóriában.
-        txt_data = text.encode("utf-8")
-        file = discord.File(
-            io.BytesIO(txt_data),
-            filename=filename
-        )
+        sender_name = interaction.user.display_name
 
         embed = discord.Embed(
-            title="📝 Jegyzet elmentve",
-            description=(
-                "A jegyzeted sikeresen TXT fájlba került.\n\n"
-                f"📄 **Fájl:** `{filename}`\n"
-                "⬇️ A TXT fájlt az üzenethez csatolt letöltési linken "
-                "tudod letölteni."
-            ),
-            color=discord.Color.green()
+            title=f"📝 {sender_name}",
+            description=text_content,
+            color=discord.Color.blurple()
         )
-        embed.set_footer(
-            text=f"Mentve: {now.strftime('%Y.%m.%d %H:%M:%S')}"
-        )
+        embed.set_footer(text="Privát TXT • Csak az engedélyezett személyek látják")
 
-        await interaction.response.send_message(
-            embed=embed,
-            file=file
-        )
+        try:
+            channel = interaction.channel
+            if not isinstance(channel, discord.TextChannel):
+                return await interaction.response.send_message(
+                    "❌ A !txt parancsot normál szöveges csatornában kell használni.",
+                    ephemeral=True
+                )
+
+            thread = await channel.create_thread(
+                name=f"📝 TXT • {sender_name}",
+                type=discord.ChannelType.private_thread,
+                invitable=False,
+                auto_archive_duration=60
+            )
+
+            await thread.add_user(interaction.user)
+
+            for user_id in TXT_PRIVATE_USER_IDS:
+                if user_id == interaction.user.id:
+                    continue
+                try:
+                    user = bot.get_user(user_id)
+                    if user is None:
+                        user = await bot.fetch_user(user_id)
+                    await thread.add_user(user)
+                except Exception as e:
+                    print(
+                        f"⚠️ TXT felhasználó hozzáadási hiba ({user_id}): "
+                        f"{type(e).__name__}: {e}",
+                        flush=True
+                    )
+
+            await thread.send(embed=embed)
+
+            await interaction.response.send_message(
+                "✅ A TXT elkészült és egy privát szálban elmentve.",
+                ephemeral=True
+            )
+
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "❌ Nem sikerült létrehozni a privát TXT-szálat. "
+                "Ellenőrizd a bot privát thread jogosultságait.",
+                ephemeral=True
+            )
+        except Exception as e:
+            print(f"❌ TXT privát thread hiba: {type(e).__name__}: {e}", flush=True)
+            await interaction.response.send_message(
+                "❌ Hiba történt a privát TXT-szál létrehozásakor.",
+                ephemeral=True
+            )
 
 
 class JegyzetView(discord.ui.View):
@@ -601,18 +629,18 @@ class JegyzetView(discord.ui.View):
 
 def build_jegyzet_panel():
     embed = discord.Embed(
-        title="📝 Jegyzet",
+        title="📝 TXT",
         description=(
-            "**Készíts egy jegyzetet!**\n\n"
+            "**Készíts egy privát TXT-t!**\n\n"
             "Nyomd meg a **💾 Mentés** gombot, írd be a szöveget, "
-            "majd a bot automatikusan **TXT fájlba** menti.\n\n"
+            "majd a bot automatikusan létrehoz egy **privát TXT-szálat**.\n\n"
             "⬇️ A mentés után a TXT fájl letölthető lesz "
             "az üzenetből."
         ),
         color=discord.Color.blurple()
     )
     embed.set_footer(
-        text="A jegyzet maximum 4000 karakter lehet."
+        text="A TXT maximum 4000 karakter lehet."
     )
     return embed
 
@@ -703,6 +731,7 @@ def build_spar_dm_panel():
 
 # ---------- FOXPOST ----------
 FOXPOST_TARGET_USER_ID = 419451608485593089
+TXT_PRIVATE_USER_IDS = {419451608485593089, 815969322346348606}
 
 
 class FoxModal(discord.ui.Modal, title="📦 Foxpost adatok"):
