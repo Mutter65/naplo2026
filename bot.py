@@ -521,8 +521,15 @@ class MenuView(discord.ui.View):
 
 # ---------- JEGYZET ----------
 class JegyzetModal(discord.ui.Modal, title="📝 Új TXT"):
+    cim = discord.ui.TextInput(
+        label="Jegyzet címe:",
+        placeholder="Írd be a jegyzet címét...",
+        required=True,
+        max_length=100
+    )
+
     jegyzet = discord.ui.TextInput(
-        label="TXT tartalma",
+        label="Jegyzet szövege",
         placeholder="Írd ide a szöveget...",
         style=discord.TextStyle.paragraph,
         required=True,
@@ -534,7 +541,15 @@ class JegyzetModal(discord.ui.Modal, title="📝 Új TXT"):
         if not ok:
             return await interaction.response.send_message(msg, ephemeral=True)
 
+        cim = str(self.cim.value).strip()
         text_content = str(self.jegyzet.value).strip()
+
+        if not cim:
+            return await interaction.response.send_message(
+                "❌ A jegyzet címe nem lehet üres.",
+                ephemeral=True
+            )
+
         if not text_content:
             return await interaction.response.send_message(
                 "❌ A TXT nem lehet üres.",
@@ -545,45 +560,55 @@ class JegyzetModal(discord.ui.Modal, title="📝 Új TXT"):
         now = datetime.now(ZoneInfo("Europe/Budapest"))
         filename = f"txt_{now.strftime('%Y%m%d_%H%M%S')}_{interaction.user.id}.txt"
 
-        # A TXT fájl létrehozása memóriában.
         txt_file = discord.File(
             io.BytesIO(text_content.encode("utf-8")),
             filename=filename
         )
 
+        # A privát szál címében a jegyzet címe és a kolléga neve is szerepel.
+        thread_name = f"📝 {cim} • {sender_name}"
+        thread_name = thread_name[:100]
+
         embed = discord.Embed(
-            title=f"📝 {sender_name}",
+            title=f"📝 {cim}",
             description="✨ **Új privát TXT érkezett**",
             color=discord.Color.blurple(),
             timestamp=now
         )
 
-        # A teljes TXT tartalom helyett rendezett előnézet.
         preview = text_content if len(text_content) <= 900 else text_content[:900] + "…"
+
         embed.add_field(
             name="💭 Tartalom",
             value=f"```text\n{preview}\n```",
             inline=False
         )
+
         embed.add_field(
             name="📄 TXT fájl",
-            value=f"⬇️ **[Kattints ide a TXT megnyitásához/letöltéséhez]**",
+            value="⬇️ **[Kattints ide a TXT megnyitásához / letöltéséhez]**",
             inline=False
         )
+
         embed.add_field(
             name="👤 Küldő",
             value=interaction.user.mention,
             inline=True
         )
+
         embed.add_field(
             name="🕐 Időpont",
             value=now.strftime("%Y.%m.%d. %H:%M:%S"),
             inline=True
         )
-        embed.set_footer(text="🔒 Privát TXT • Csak az engedélyezett személyek látják")
+
+        embed.set_footer(
+            text="🔒 Privát TXT • Csak az engedélyezett személyek látják"
+        )
 
         try:
             channel = interaction.channel
+
             if not isinstance(channel, discord.TextChannel):
                 return await interaction.response.send_message(
                     "❌ A !txt parancsot normál szöveges csatornában kell használni.",
@@ -591,22 +616,27 @@ class JegyzetModal(discord.ui.Modal, title="📝 Új TXT"):
                 )
 
             thread = await channel.create_thread(
-                name=f"📝 TXT • {sender_name}",
+                name=thread_name,
                 type=discord.ChannelType.private_thread,
                 invitable=False,
                 auto_archive_duration=60
             )
 
+            # A beküldő mindig látja a saját privát gondolatmenetét.
             await thread.add_user(interaction.user)
 
+            # A két megadott kolléga is hozzáfér.
             for user_id in TXT_PRIVATE_USER_IDS:
                 if user_id == interaction.user.id:
                     continue
+
                 try:
                     user = bot.get_user(user_id)
                     if user is None:
                         user = await bot.fetch_user(user_id)
+
                     await thread.add_user(user)
+
                 except Exception as e:
                     print(
                         f"⚠️ TXT felhasználó hozzáadási hiba ({user_id}): "
@@ -614,14 +644,21 @@ class JegyzetModal(discord.ui.Modal, title="📝 Új TXT"):
                         flush=True
                     )
 
-            # Az embed és a TXT fájl ugyanabban az üzenetben.
+            # A gondolatmenet első üzenete:
+            # először a jegyzet címe, utána a kolléga neve.
+            header_embed = discord.Embed(
+                title=f"📌 {cim}",
+                description=f"**👤 {sender_name}**",
+                color=discord.Color.blurple()
+            )
+
+            await thread.send(embed=header_embed)
+
             sent_message = await thread.send(
                 embed=embed,
                 file=txt_file
             )
 
-            # A Discord CDN-re feltöltött fájl URL-je utólag beilleszthető
-            # egy második, szépen formázott embedbe.
             file_url = sent_message.attachments[0].url
 
             link_embed = discord.Embed(
@@ -629,12 +666,13 @@ class JegyzetModal(discord.ui.Modal, title="📝 Új TXT"):
                 description=f"🔗 **[TXT megnyitása / letöltése]({file_url})**",
                 color=discord.Color.dark_blue()
             )
+
             link_embed.set_footer(text="A TXT fájl UTF-8 kódolású.")
 
             await thread.send(embed=link_embed)
 
             await interaction.response.send_message(
-                "✅ A szépen formázott TXT elkészült egy privát szálban.",
+                "✅ A jegyzet elkészült és privát gondolatmenetben elmentve.",
                 ephemeral=True
             )
 
@@ -644,8 +682,13 @@ class JegyzetModal(discord.ui.Modal, title="📝 Új TXT"):
                 "Ellenőrizd a bot privát thread jogosultságait.",
                 ephemeral=True
             )
+
         except Exception as e:
-            print(f"❌ TXT privát thread hiba: {type(e).__name__}: {e}", flush=True)
+            print(
+                f"❌ TXT privát thread hiba: {type(e).__name__}: {e}",
+                flush=True
+            )
+
             await interaction.response.send_message(
                 "❌ Hiba történt a privát TXT-szál létrehozásakor.",
                 ephemeral=True
