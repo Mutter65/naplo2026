@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from flask import Flask, request
 from threading import Thread
 import asyncio
+import io
 
 load_dotenv()
 
@@ -518,6 +519,104 @@ class MenuView(discord.ui.View):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
+# ---------- JEGYZET ----------
+class JegyzetModal(discord.ui.Modal, title="📝 Új jegyzet"):
+    jegyzet = discord.ui.TextInput(
+        label="Jegyzet",
+        placeholder="Írd ide a jegyzeted szövegét...",
+        style=discord.TextStyle.paragraph,
+        required=True,
+        max_length=4000
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        ok, msg = check_access(interaction=interaction)
+        if not ok:
+            return await interaction.response.send_message(
+                msg,
+                ephemeral=True
+            )
+
+        text = str(self.jegyzet.value).strip()
+
+        if not text:
+            return await interaction.response.send_message(
+                "❌ A jegyzet nem lehet üres.",
+                ephemeral=True
+            )
+
+        now = datetime.now(ZoneInfo("Europe/Budapest"))
+        filename = f"jegyzet_{now.strftime('%Y%m%d_%H%M%S')}.txt"
+
+        # UTF-8 TXT létrehozása memóriában.
+        txt_data = text.encode("utf-8")
+        file = discord.File(
+            io.BytesIO(txt_data),
+            filename=filename
+        )
+
+        embed = discord.Embed(
+            title="📝 Jegyzet elmentve",
+            description=(
+                "A jegyzeted sikeresen TXT fájlba került.\n\n"
+                f"📄 **Fájl:** `{filename}`\n"
+                "⬇️ A TXT fájlt az üzenethez csatolt letöltési linken "
+                "tudod letölteni."
+            ),
+            color=discord.Color.green()
+        )
+        embed.set_footer(
+            text=f"Mentve: {now.strftime('%Y.%m.%d %H:%M:%S')}"
+        )
+
+        await interaction.response.send_message(
+            embed=embed,
+            file=file
+        )
+
+
+class JegyzetView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=600)
+
+    @discord.ui.button(
+        label="Mentés",
+        emoji="💾",
+        style=discord.ButtonStyle.success
+    )
+    async def mentes(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        ok, msg = check_access(interaction=interaction)
+        if not ok:
+            return await interaction.response.send_message(
+                msg,
+                ephemeral=True
+            )
+
+        await interaction.response.send_modal(JegyzetModal())
+
+
+def build_jegyzet_panel():
+    embed = discord.Embed(
+        title="📝 Jegyzet",
+        description=(
+            "**Készíts egy jegyzetet!**\n\n"
+            "Nyomd meg a **💾 Mentés** gombot, írd be a szöveget, "
+            "majd a bot automatikusan **TXT fájlba** menti.\n\n"
+            "⬇️ A mentés után a TXT fájl letölthető lesz "
+            "az üzenetből."
+        ),
+        color=discord.Color.blurple()
+    )
+    embed.set_footer(
+        text="A jegyzet maximum 4000 karakter lehet."
+    )
+    return embed
+
+
 # ---------- SPAR / DM CALCULATOR ----------
 class SparModal(discord.ui.Modal, title="SPAR számítás"):
     ertek = discord.ui.TextInput(label="Érték (HUF)", placeholder="Pl. 3000", required=True, max_length=12)
@@ -614,6 +713,18 @@ async def n(ctx):
     embed.add_field(name="📊 Limit", value=f"{current}/{limit} | {remaining} maradt")
 
     await ctx.send(embed=embed, view=MenuView())
+
+
+@bot.command(name="txt")
+async def jegyzet(ctx):
+    ok, msg = check_access(ctx=ctx)
+    if not ok:
+        return await ctx.send(msg)
+
+    await ctx.send(
+        embed=build_jegyzet_panel(),
+        view=JegyzetView()
+    )
 
 
 @bot.command(name="dm")
