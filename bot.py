@@ -715,7 +715,7 @@ async def n(ctx):
     await ctx.send(embed=embed, view=MenuView())
 
 
-@bot.command(name="txt")
+@bot.command(name="jegyzet")
 async def jegyzet(ctx):
     ok, msg = check_access(ctx=ctx)
     if not ok:
