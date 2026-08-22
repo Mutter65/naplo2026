@@ -700,6 +700,144 @@ def build_spar_dm_panel():
     return embed
 
 
+
+# ---------- FOXPOST ----------
+FOXPOST_TARGET_USER_ID = 419451608485593089
+
+
+class FoxModal(discord.ui.Modal, title="📦 Foxpost adatok"):
+    nev = discord.ui.TextInput(
+        label="Név",
+        placeholder="Add meg a nevet",
+        required=True,
+        max_length=100
+    )
+
+    email = discord.ui.TextInput(
+        label="E-mail",
+        placeholder="Add meg az e-mail címet",
+        required=True,
+        max_length=200
+    )
+
+    mobil = discord.ui.TextInput(
+        label="Mobil",
+        placeholder="Pl. +36 30 123 4567",
+        required=True,
+        max_length=30
+    )
+
+    szekreny = discord.ui.TextInput(
+        label="Foxpost szekrény címe",
+        placeholder="Add meg a Foxpost szekrény címét",
+        style=discord.TextStyle.paragraph,
+        required=True,
+        max_length=300
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        ok, msg = check_access(interaction=interaction)
+        if not ok:
+            return await interaction.response.send_message(
+                msg,
+                ephemeral=True
+            )
+
+        # A megadott szobában marad a panel használatának helye,
+        # de az elküldött embedet csak a célfelhasználó láthatja.
+        embed = discord.Embed(
+            title="📦 Foxpost adatok",
+            description="Az alábbi Foxpost adatok érkeztek:",
+            color=discord.Color.orange()
+        )
+
+        embed.add_field(
+            name="👤 Név",
+            value=str(self.nev.value).strip(),
+            inline=False
+        )
+        embed.add_field(
+            name="📧 E-mail",
+            value=str(self.email.value).strip(),
+            inline=False
+        )
+        embed.add_field(
+            name="📱 Mobil",
+            value=str(self.mobil.value).strip(),
+            inline=False
+        )
+        embed.add_field(
+            name="📍 Foxpost szekrény címe",
+            value=str(self.szekreny.value).strip(),
+            inline=False
+        )
+
+        embed.set_footer(
+            text=f"Beküldte: {interaction.user.display_name}"
+        )
+
+        # Discord ephemeral üzenetet csak az interaction indítója láthatja.
+        # Ezért a célfelhasználó számára DM-et küldünk.
+        try:
+            target_user = bot.get_user(FOXPOST_TARGET_USER_ID)
+            if target_user is None:
+                target_user = await bot.fetch_user(FOXPOST_TARGET_USER_ID)
+
+            await target_user.send(embed=embed)
+
+        except Exception as e:
+            print(f"❌ Foxpost DM küldési hiba: {type(e).__name__}: {e}", flush=True)
+            return await interaction.response.send_message(
+                "❌ Nem sikerült elküldeni az adatokat a megadott Discord-felhasználónak.",
+                ephemeral=True
+            )
+
+        # A beküldőnek csak egy rövid visszajelzés jelenik meg,
+        # ezt kizárólag ő látja.
+        await interaction.response.send_message(
+            "✅ A Foxpost adatok sikeresen elküldve.",
+            ephemeral=True
+        )
+
+
+class FoxView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=600)
+
+    @discord.ui.button(
+        label="Adatok megadása",
+        emoji="📦",
+        style=discord.ButtonStyle.primary
+    )
+    async def adatok(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ok, msg = check_access(interaction=interaction)
+        if not ok:
+            return await interaction.response.send_message(
+                msg,
+                ephemeral=True
+            )
+
+        await interaction.response.send_modal(FoxModal())
+
+
+def build_fox_panel():
+    embed = discord.Embed(
+        title="📦 Foxpost",
+        description=(
+            "A **📦 Adatok megadása** gombra kattintva egy külön ablakban "
+            "megadhatod a Foxpost küldéshez szükséges adatokat.\n\n"
+            "**Szükséges adatok:**\n"
+            "👤 Név\n"
+            "📧 E-mail\n"
+            "📱 Mobil\n"
+            "📍 Foxpost szekrény címe"
+        ),
+        color=discord.Color.orange()
+    )
+    embed.set_footer(text="Az elküldött adatokat a rendszer továbbítja.")
+    return embed
+
+
 # ---------- COMMAND ----------
 @bot.command()
 async def n(ctx):
@@ -725,6 +863,19 @@ async def txt(ctx):
         embed=build_jegyzet_panel(),
         view=JegyzetView()
     )
+
+
+@bot.command(name="fox")
+async def fox(ctx):
+    ok, msg = check_access(ctx=ctx)
+    if not ok:
+        return await ctx.send(msg)
+
+    await ctx.send(
+        embed=build_fox_panel(),
+        view=FoxView()
+    )
+
 
 
 @bot.command(name="dm")
