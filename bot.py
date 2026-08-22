@@ -738,66 +738,81 @@ class FoxModal(discord.ui.Modal, title="📦 Foxpost adatok"):
     async def on_submit(self, interaction: discord.Interaction):
         ok, msg = check_access(interaction=interaction)
         if not ok:
-            return await interaction.response.send_message(
-                msg,
-                ephemeral=True
-            )
+            return await interaction.response.send_message(msg, ephemeral=True)
 
-        # A megadott szobában marad a panel használatának helye,
-        # de az elküldött embedet csak a célfelhasználó láthatja.
         embed = discord.Embed(
             title="📦 Foxpost adatok",
             description="Az alábbi Foxpost adatok érkeztek:",
             color=discord.Color.orange()
         )
 
-        embed.add_field(
-            name="👤 Név",
-            value=str(self.nev.value).strip(),
-            inline=False
-        )
-        embed.add_field(
-            name="📧 E-mail",
-            value=str(self.email.value).strip(),
-            inline=False
-        )
-        embed.add_field(
-            name="📱 Mobil",
-            value=str(self.mobil.value).strip(),
-            inline=False
-        )
+        embed.add_field(name="👤 Név", value=str(self.nev.value).strip(), inline=False)
+        embed.add_field(name="📧 E-mail", value=str(self.email.value).strip(), inline=False)
+        embed.add_field(name="📱 Mobil", value=str(self.mobil.value).strip(), inline=False)
         embed.add_field(
             name="📍 Foxpost szekrény címe",
             value=str(self.szekreny.value).strip(),
             inline=False
         )
+        embed.set_footer(text=f"Beküldte: {interaction.user.display_name}")
 
-        embed.set_footer(
-            text=f"Beküldte: {interaction.user.display_name}"
-        )
-
-        # Discord ephemeral üzenetet csak az interaction indítója láthatja.
-        # Ezért a célfelhasználó számára DM-et küldünk.
         try:
             target_user = bot.get_user(FOXPOST_TARGET_USER_ID)
             if target_user is None:
                 target_user = await bot.fetch_user(FOXPOST_TARGET_USER_ID)
-
-            await target_user.send(embed=embed)
-
         except Exception as e:
-            print(f"❌ Foxpost DM küldési hiba: {type(e).__name__}: {e}", flush=True)
+            print(f"❌ Foxpost célfelhasználó hiba: {type(e).__name__}: {e}", flush=True)
             return await interaction.response.send_message(
-                "❌ Nem sikerült elküldeni az adatokat a megadott Discord-felhasználónak.",
+                "❌ Nem sikerült elérni a megadott Discord-felhasználót.",
                 ephemeral=True
             )
 
-        # A beküldőnek csak egy rövid visszajelzés jelenik meg,
-        # ezt kizárólag ő látja.
-        await interaction.response.send_message(
-            "✅ A Foxpost adatok sikeresen elküldve.",
-            ephemeral=True
-        )
+        # A DM megmarad.
+        try:
+            await target_user.send(embed=embed)
+        except Exception as e:
+            print(f"⚠️ Foxpost DM küldési hiba: {type(e).__name__}: {e}", flush=True)
+
+        # Privát thread létrehozása abban a csatornában, ahol a !fox használva lett.
+        try:
+            channel = interaction.channel
+
+            if not isinstance(channel, discord.TextChannel):
+                return await interaction.response.send_message(
+                    "❌ A !fox parancsot normál szöveges csatornában kell használni.",
+                    ephemeral=True
+                )
+
+            thread = await channel.create_thread(
+                name=f"📦 Foxpost • {target_user.display_name}",
+                type=discord.ChannelType.private_thread,
+                invitable=False,
+                auto_archive_duration=60
+            )
+
+            await thread.add_user(target_user)
+            await thread.send(embed=embed)
+
+            await interaction.response.send_message(
+                "✅ Foxpost adatok elküldve!\n"
+                f"📩 DM elküldve: {target_user.mention}\n"
+                f"🔒 Privát szál létrehozva: **{thread.name}**\n"
+                "⏱️ A szál 1 óra inaktivitás után automatikusan archiválódik.",
+                ephemeral=True
+            )
+
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "❌ Nem sikerült létrehozni a privát szálat. "
+                "A botnak szüksége van a privát szálak létrehozásához és kezeléséhez szükséges jogosultságokra.",
+                ephemeral=True
+            )
+        except Exception as e:
+            print(f"❌ Foxpost privát thread hiba: {type(e).__name__}: {e}", flush=True)
+            await interaction.response.send_message(
+                "❌ Hiba történt a privát Foxpost szál létrehozásakor.",
+                ephemeral=True
+            )
 
 
 class FoxView(discord.ui.View):
