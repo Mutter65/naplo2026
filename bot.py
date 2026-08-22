@@ -542,13 +542,45 @@ class JegyzetModal(discord.ui.Modal, title="📝 Új TXT"):
             )
 
         sender_name = interaction.user.display_name
+        now = datetime.now(ZoneInfo("Europe/Budapest"))
+        filename = f"txt_{now.strftime('%Y%m%d_%H%M%S')}_{interaction.user.id}.txt"
+
+        # A TXT fájl létrehozása memóriában.
+        txt_file = discord.File(
+            io.BytesIO(text_content.encode("utf-8")),
+            filename=filename
+        )
 
         embed = discord.Embed(
             title=f"📝 {sender_name}",
-            description=text_content,
-            color=discord.Color.blurple()
+            description="✨ **Új privát TXT érkezett**",
+            color=discord.Color.blurple(),
+            timestamp=now
         )
-        embed.set_footer(text="Privát TXT • Csak az engedélyezett személyek látják")
+
+        # A teljes TXT tartalom helyett rendezett előnézet.
+        preview = text_content if len(text_content) <= 900 else text_content[:900] + "…"
+        embed.add_field(
+            name="💭 Tartalom",
+            value=f"```text\n{preview}\n```",
+            inline=False
+        )
+        embed.add_field(
+            name="📄 TXT fájl",
+            value=f"⬇️ **[Kattints ide a TXT megnyitásához/letöltéséhez]**",
+            inline=False
+        )
+        embed.add_field(
+            name="👤 Küldő",
+            value=interaction.user.mention,
+            inline=True
+        )
+        embed.add_field(
+            name="🕐 Időpont",
+            value=now.strftime("%Y.%m.%d. %H:%M:%S"),
+            inline=True
+        )
+        embed.set_footer(text="🔒 Privát TXT • Csak az engedélyezett személyek látják")
 
         try:
             channel = interaction.channel
@@ -582,10 +614,27 @@ class JegyzetModal(discord.ui.Modal, title="📝 Új TXT"):
                         flush=True
                     )
 
-            await thread.send(embed=embed)
+            # Az embed és a TXT fájl ugyanabban az üzenetben.
+            sent_message = await thread.send(
+                embed=embed,
+                file=txt_file
+            )
+
+            # A Discord CDN-re feltöltött fájl URL-je utólag beilleszthető
+            # egy második, szépen formázott embedbe.
+            file_url = sent_message.attachments[0].url
+
+            link_embed = discord.Embed(
+                title="📎 TXT fájl",
+                description=f"🔗 **[TXT megnyitása / letöltése]({file_url})**",
+                color=discord.Color.dark_blue()
+            )
+            link_embed.set_footer(text="A TXT fájl UTF-8 kódolású.")
+
+            await thread.send(embed=link_embed)
 
             await interaction.response.send_message(
-                "✅ A TXT elkészült és egy privát szálban elmentve.",
+                "✅ A szépen formázott TXT elkészült egy privát szálban.",
                 ephemeral=True
             )
 
