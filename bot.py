@@ -740,9 +740,12 @@ class FoxModal(discord.ui.Modal, title="📦 Foxpost adatok"):
         if not ok:
             return await interaction.response.send_message(msg, ephemeral=True)
 
+        # A küldő neve külön, jól láthatóan az embed első sorában.
+        sender_name = interaction.user.display_name
+
         embed = discord.Embed(
-            title="📦 Foxpost adatok",
-            description="Az alábbi Foxpost adatok érkeztek:",
+            title=f"**{sender_name}**",
+            description="📦 **Foxpost adatok érkeztek**",
             color=discord.Color.orange()
         )
 
