@@ -715,8 +715,8 @@ async def n(ctx):
     await ctx.send(embed=embed, view=MenuView())
 
 
-@bot.command(name="jegyzet")
-async def jegyzet(ctx):
+@bot.command(name="txt")
+async def txt(ctx):
     ok, msg = check_access(ctx=ctx)
     if not ok:
         return await ctx.send(msg)
@@ -1192,3 +1192,4 @@ while True:
         traceback.print_exc()
         import time
         time.sleep(5)
+```
