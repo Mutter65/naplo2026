@@ -1065,7 +1065,8 @@ def get_rates():
             "HUF": 1.0,
             "USD": float(data["rates"]["USD"]),
             "EUR": float(data["rates"]["EUR"]),
-            "GBP": float(data["rates"]["GBP"])
+            "GBP": float(data["rates"]["GBP"]),
+            "TRY": float(data["rates"]["TRY"])
         }
     except Exception as e:
         print("Árfolyam hiba:", e)
@@ -1080,6 +1081,7 @@ async def handle_money(message):
         (r'€\s?(\d+(?:\.\d+)?)', 'EUR'),
         (r'\$\s?(\d+(?:\.\d+)?)', 'USD'),
         (r'£\s?(\d+(?:\.\d+)?)', 'GBP'),
+        (r'(\d+(?:\.\d+)?)\s?TRY', 'TRY'),
         (r'(\d+(?:\.\d+)?)\s?HUF', 'HUF')
     ]
 
@@ -1098,13 +1100,15 @@ async def handle_money(message):
         usd = huf * rates["USD"]
         eur = huf * rates["EUR"]
         gbp = huf * rates["GBP"]
+        try_amount = huf * rates["TRY"]
 
         await message.reply(
             f"💰 Ez az összeg:\n"
             f"🇭🇺 {round(huf):,.0f} HUF\n"
             f"🇺🇸 ${usd:.2f}\n"
             f"🇪🇺 €{eur:.2f}\n"
-            f"🇬🇧 £{gbp:.2f}"
+            f"🇬🇧 £{gbp:.2f}\n"
+            f"🇹🇷 ₺{try_amount:.2f} TRY"
         )
         return
 
