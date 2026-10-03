@@ -602,6 +602,177 @@ def build_spar_dm_panel():
 
 
 
+
+# ---------- BOLT / NYITVATARTÁS ----------
+BOLTOK = {
+    "MOHÁCS": [
+        # Ide kerülnek a táblázat alapján az üzletek.
+        # Példa:
+        # {"nev": "SPAR", "hetkoznap": ("07:00", "20:00"), "szombat": ("07:00", "20:00"), "vasarnap": ("08:00", "18:00")},
+    ],
+    "PÉCS": [
+        # Ide kerülnek a táblázat alapján az üzletek.
+    ],
+}
+
+
+def parse_bolt_time(value):
+    """HH:MM formátumú időből perceket készít."""
+    hour, minute = map(int, value.split(":"))
+    return hour * 60 + minute
+
+
+def get_bolt_open_close(shop, now):
+    """
+    Visszaadja az adott naphoz tartozó nyitási/zárási időt.
+    A BOLTOK adatai Europe/Budapest idő szerint értendők.
+    """
+    weekday = now.weekday()
+
+    if weekday < 5:
+        key = "hetkoznap"
+    elif weekday == 5:
+        key = "szombat"
+    else:
+        key = "vasarnap"
+
+    hours = shop.get(key)
+
+    if not hours:
+        return None, None
+
+    return hours[0], hours[1]
+
+
+def get_bolt_status(shop):
+    """Megállapítja, hogy az üzlet jelenleg nyitva van-e."""
+    now = datetime.now(ZoneInfo("Europe/Budapest"))
+    opening, closing = get_bolt_open_close(shop, now)
+
+    if not opening or not closing:
+        return False, None, None
+
+    current_minutes = now.hour * 60 + now.minute
+    opening_minutes = parse_bolt_time(opening)
+    closing_minutes = parse_bolt_time(closing)
+
+    # Normál, ugyanazon napon nyitó üzlet.
+    if opening_minutes <= closing_minutes:
+        is_open = opening_minutes <= current_minutes < closing_minutes
+    else:
+        # Éjfélen átnyúló nyitvatartás.
+        is_open = current_minutes >= opening_minutes or current_minutes < closing_minutes
+
+    return is_open, opening, closing
+
+
+def build_bolt_embed(varos):
+    shops = BOLTOK.get(varos, [])
+
+    embed = discord.Embed(
+        title=f"🏪 {varos} ÜZLETEI",
+        color=discord.Color.blurple(),
+        timestamp=datetime.now(ZoneInfo("Europe/Budapest"))
+    )
+
+    if not shops:
+        embed.description = (
+            "❌ Ehhez a városhoz még nincs feltöltve üzletadat.\n\n"
+            "A `BOLTOK` részben add meg a táblázat szerinti üzleteket és nyitvatartásokat."
+        )
+        embed.set_footer(text="Magyar idő • Europe/Budapest")
+        return embed
+
+    lines = []
+
+    for shop in shops:
+        nev = str(shop.get("nev", "ISMERETLEN ÜZLET")).upper()
+        is_open, opening, closing = get_bolt_status(shop)
+
+        if is_open:
+            lines.append(
+                f"🟢 **{nev}** — **Nyitva: még {closing}-ig**"
+            )
+        else:
+            lines.append(
+                f"🔴 **{nev}** — **Zárva**"
+            )
+
+    embed.description = "\n".join(lines)
+    embed.set_footer(text="Az állapot a jelenlegi magyar idő alapján készül.")
+
+    return embed
+
+
+class BoltSelect(discord.ui.Select):
+    def __init__(self):
+        super().__init__(
+            custom_id="bolt_select",
+            placeholder="Válassz várost",
+            options=[
+                discord.SelectOption(
+                    label="MOHÁCS",
+                    value="MOHÁCS",
+                    emoji="🏪",
+                    description="MOHÁCS ÜZLETEINEK NYITVATARTÁSA"
+                ),
+                discord.SelectOption(
+                    label="PÉCS",
+                    value="PÉCS",
+                    emoji="🏪",
+                    description="PÉCS ÜZLETEINEK NYITVATARTÁSA"
+                ),
+            ]
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        ok, msg = check_access(interaction=interaction)
+        if not ok:
+            return await interaction.response.send_message(
+                msg,
+                ephemeral=True
+            )
+
+        varos = self.values[0]
+        embed = build_bolt_embed(varos)
+
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=True
+        )
+
+
+class BoltView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=300)
+        self.add_item(BoltSelect())
+
+
+@bot.command(name="bolt")
+async def bolt(ctx):
+    ok, msg = check_access(ctx=ctx)
+
+    if not ok:
+        return await ctx.send(msg)
+
+    embed = discord.Embed(
+        title="🏪 BOLT",
+        description="**Válassz várost:**",
+        color=discord.Color.blurple()
+    )
+
+    embed.add_field(
+        name="📍 VÁROSOK",
+        value="🏪 **MOHÁCS**\n🏪 **PÉCS**",
+        inline=False
+    )
+
+    await ctx.send(
+        embed=embed,
+        view=BoltView()
+    )
+
+
 # ---------- VBUCK CALCULATOR ----------
 VBUCK_PACKAGES = [
     (800, 2700),
