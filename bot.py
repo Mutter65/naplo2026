@@ -604,14 +604,32 @@ def build_spar_dm_panel():
 
 
 # ---------- BOLT / NYITVATARTÁS ----------
+# A megadott MOHÁCS-i táblázat zárási időket tartalmaz.
+# Ezért a bot az adott napi zárási időig NYITVA, utána ZÁRVA állapotot jelez.
+# Ahol a táblázatban nincs vasárnapi adat, ott vasárnap ZÁRVA jelenik meg.
+
 BOLTOK = {
     "MOHÁCS": [
-        # Ide kerülnek a táblázat alapján az üzletek.
-        # Példa:
-        # {"nev": "SPAR", "hetkoznap": ("07:00", "20:00"), "szombat": ("07:00", "20:00"), "vasarnap": ("08:00", "18:00")},
+        {"nev": "ALDI", "hetkoznap": "20:00", "szombat": "20:00", "vasarnap": "19:00"},
+        {"nev": "LIDL", "hetkoznap": "21:00", "szombat": "21:00", "vasarnap": "19:00"},
+        {"nev": "TESCO", "hetkoznap": "21:00", "szombat": "21:00", "vasarnap": "19:00"},
+        {"nev": "PENNY", "hetkoznap": "20:00", "szombat": "20:00", "vasarnap": "18:00"},
+        {"nev": "SPAR", "hetkoznap": "20:00", "szombat": "17:00", "vasarnap": "13:00"},
+        {"nev": "FORZA", "hetkoznap": "20:00", "szombat": "20:00", "vasarnap": "13:00"},
+        {"nev": "ARANY FORZA", "hetkoznap": "19:00", "szombat": "19:00", "vasarnap": "13:00"},
+        {"nev": "MINI FORZA", "hetkoznap": "19:00", "szombat": "13:00", "vasarnap": None},
+        {"nev": "JYSK", "hetkoznap": "18:00", "szombat": "18:00", "vasarnap": "16:00"},
+        {"nev": "DIEGO", "hetkoznap": "17:00", "szombat": "13:00", "vasarnap": None},
+        {"nev": "ROSSMANN", "hetkoznap": "18:00", "szombat": "13:00", "vasarnap": None},
+        {"nev": "DM", "hetkoznap": "20:00", "szombat": "20:00", "vasarnap": "17:00"},
+        {"nev": "EURONICS", "hetkoznap": "18:00", "szombat": "13:00", "vasarnap": None},
+        {"nev": "PEPCO", "hetkoznap": "19:00", "szombat": "19:00", "vasarnap": "17:00"},
+        {"nev": "TEDDY", "hetkoznap": "20:00", "szombat": "20:00", "vasarnap": "18:00"},
+        {"nev": "ECHO FAMILY", "hetkoznap": "20:00", "szombat": "20:00", "vasarnap": "18:00"},
+        {"nev": "KIK", "hetkoznap": "20:00", "szombat": "20:00", "vasarnap": "18:00"},
     ],
     "PÉCS": [
-        # Ide kerülnek a táblázat alapján az üzletek.
+        # A PÉCS-i táblázat még nincs megadva.
     ],
 }
 
@@ -622,11 +640,8 @@ def parse_bolt_time(value):
     return hour * 60 + minute
 
 
-def get_bolt_open_close(shop, now):
-    """
-    Visszaadja az adott naphoz tartozó nyitási/zárási időt.
-    A BOLTOK adatai Europe/Budapest idő szerint értendők.
-    """
+def get_bolt_closing(shop, now):
+    """Visszaadja az adott naphoz tartozó zárási időt."""
     weekday = now.weekday()
 
     if weekday < 5:
@@ -636,34 +651,28 @@ def get_bolt_open_close(shop, now):
     else:
         key = "vasarnap"
 
-    hours = shop.get(key)
-
-    if not hours:
-        return None, None
-
-    return hours[0], hours[1]
+    return shop.get(key)
 
 
 def get_bolt_status(shop):
-    """Megállapítja, hogy az üzlet jelenleg nyitva van-e."""
+    """
+    Megállapítja az üzlet állapotát a megadott zárási idő alapján.
+    A táblázat csak zárási időket tartalmaz, nyitási időket nem.
+    """
     now = datetime.now(ZoneInfo("Europe/Budapest"))
-    opening, closing = get_bolt_open_close(shop, now)
+    closing = get_bolt_closing(shop, now)
 
-    if not opening or not closing:
-        return False, None, None
+    # Ha az adott naphoz nincs adat, akkor zárva.
+    if not closing:
+        return False, None
 
     current_minutes = now.hour * 60 + now.minute
-    opening_minutes = parse_bolt_time(opening)
     closing_minutes = parse_bolt_time(closing)
 
-    # Normál, ugyanazon napon nyitó üzlet.
-    if opening_minutes <= closing_minutes:
-        is_open = opening_minutes <= current_minutes < closing_minutes
-    else:
-        # Éjfélen átnyúló nyitvatartás.
-        is_open = current_minutes >= opening_minutes or current_minutes < closing_minutes
+    # A zárási idő pillanatában már zárva.
+    is_open = current_minutes < closing_minutes
 
-    return is_open, opening, closing
+    return is_open, closing
 
 
 def build_bolt_embed(varos):
@@ -678,7 +687,7 @@ def build_bolt_embed(varos):
     if not shops:
         embed.description = (
             "❌ Ehhez a városhoz még nincs feltöltve üzletadat.\n\n"
-            "A `BOLTOK` részben add meg a táblázat szerinti üzleteket és nyitvatartásokat."
+            "A PÉCS-i adatlap még nincs hozzáadva."
         )
         embed.set_footer(text="Magyar idő • Europe/Budapest")
         return embed
@@ -687,19 +696,24 @@ def build_bolt_embed(varos):
 
     for shop in shops:
         nev = str(shop.get("nev", "ISMERETLEN ÜZLET")).upper()
-        is_open, opening, closing = get_bolt_status(shop)
+        is_open, closing = get_bolt_status(shop)
 
         if is_open:
+            # ZÖLD jelzés = jelenleg nyitva
             lines.append(
-                f"🟢 **{nev}** — **Nyitva: még {closing}-ig**"
+                f"🟩 **{nev}** — **NYITVA** — még **{closing}-ig**"
             )
         else:
+            # PIROS jelzés = jelenleg zárva
             lines.append(
-                f"🔴 **{nev}** — **Zárva**"
+                f"🟥 **{nev}** — **ZÁRVA**"
             )
 
+    # MINDEN ÜZLET KIÍRÁSA EGYETLEN LISTÁBAN
     embed.description = "\n".join(lines)
-    embed.set_footer(text="Az állapot a jelenlegi magyar idő alapján készül.")
+    embed.set_footer(
+        text="🟩 NYITVA  •  🟥 ZÁRVA  •  Magyar idő (Europe/Budapest)"
+    )
 
     return embed
 
