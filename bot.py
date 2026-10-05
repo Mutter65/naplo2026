@@ -1197,6 +1197,92 @@ async def tw(ctx):
         view=TwitchView()
     )
 
+# ---------- PARANCSLISTA / !P ----------
+class CommandPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=300)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        ok, msg = check_access(interaction=interaction)
+        if not ok:
+            await interaction.response.send_message(msg, ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Központ", emoji="📌", style=discord.ButtonStyle.primary, row=0)
+    async def n_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        current, limit, remaining = get_user_limit_info(interaction.user.id)
+        embed = discord.Embed(title="📌 Központ", color=discord.Color.blurple())
+        embed.add_field(name="📊 Limit", value=f"{current}/{limit} | {remaining} maradt")
+        await interaction.response.send_message(embed=embed, view=MenuView(), ephemeral=True)
+
+    @discord.ui.button(label="Bolt", emoji="🏪", style=discord.ButtonStyle.success, row=0)
+    async def bolt_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(title="🏪 BOLT", description="**Válassz várost:**", color=discord.Color.blurple())
+        embed.add_field(name="📍 VÁROSOK", value="🏪 **MOHÁCS** | 🏪 **PÉCS**", inline=False)
+        await interaction.response.send_message(embed=embed, view=BoltView(), ephemeral=True)
+
+    @discord.ui.button(label="SPAR / dm", emoji="🛒", style=discord.ButtonStyle.danger, row=0)
+    async def dm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(embed=build_spar_dm_panel(), view=SparDmView(), ephemeral=True)
+
+    @discord.ui.button(label="YouTube", emoji="📺", style=discord.ButtonStyle.danger, row=0)
+    async def yt_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(embed=discord.Embed(title="📺 YouTube", description="Válassz egy YouTube csatornát.", color=discord.Color.red()), view=YoutubeView(), ephemeral=True)
+
+    @discord.ui.button(label="Twitch", emoji="🎮", style=discord.ButtonStyle.primary, row=0)
+    async def tw_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(embed=discord.Embed(title="🎮 Twitch", description="Válassz egy Twitch csatornát.", color=discord.Color.purple()), view=TwitchView(), ephemeral=True)
+
+    @discord.ui.button(label="V-Bucks", emoji="💰", style=discord.ButtonStyle.secondary, row=1)
+    async def vbuck_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(VbuckModal())
+
+    @discord.ui.button(label="Foxpost", emoji="📦", style=discord.ButtonStyle.primary, row=1)
+    async def foxpost_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(FoxpostModal())
+
+    @discord.ui.button(label="Foxpost küldés", emoji="📨", style=discord.ButtonStyle.secondary, row=1)
+    async def send_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(title="📦 FOXPOST ADATLAP", description="**Szállítási adatok**", color=discord.Color.orange())
+        embed.add_field(name="👤 Név", value="Jurák István", inline=False)
+        embed.add_field(name="📧 Email", value="chuck300@freemail.hu", inline=False)
+        embed.add_field(name="📱 Mobil", value="+36205975111", inline=False)
+        embed.add_field(name="📦 Foxpost automata", value="[Mohács, Tompa Mihály u. 15, 7700](https://maps.google.com/maps?hl=en&gl=hu&um=1&ie=UTF-8&fb=1&sa=X&ftid=0x4742d1b1f087a9ef:0x23f74ca75badeafd)", inline=False)
+        embed.set_footer(text="FOXPOST • !send")
+        try:
+            await interaction.user.send(embed=embed)
+            await interaction.response.send_message("✅ A Foxpost panelt privát üzenetben elküldtem neked.", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ Nem tudok privát üzenetet küldeni neked.", ephemeral=True)
+
+    @discord.ui.button(label="Parancsok", emoji="📖", style=discord.ButtonStyle.secondary, row=1)
+    async def commands_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(embed=build_command_embed(), view=CommandPanelView(), ephemeral=True)
+
+def build_command_embed():
+    embed = discord.Embed(
+        title="📖 BOT PARANCSOK",
+        description="**Válassz egy funkciót az alábbi gombokkal.** A parancsokat továbbra is használhatod `!` előtaggal is.",
+        color=discord.Color.blurple()
+    )
+    embed.add_field(name="📌 `!n`", value="Értesítések és mentett feladatok kezelése.", inline=False)
+    embed.add_field(name="🏪 `!bolt`", value="Üzletek és aktuális nyitvatartás megtekintése.", inline=False)
+    embed.add_field(name="🛒 `!dm`", value="SPAR és dm ár-/kedvezménykalkulátor.", inline=False)
+    embed.add_field(name="📺 `!yt`", value="YouTube csatornák gyors kiválasztása.", inline=False)
+    embed.add_field(name="🎮 `!tw`", value="Twitch csatornák gyors kiválasztása.", inline=False)
+    embed.add_field(name="💰 `!vbuck`", value="Fortnite V-Bucks kalkulátor.", inline=False)
+    embed.add_field(name="📦 `!foxpost`", value="Foxpost adatok beküldése űrlapon.", inline=False)
+    embed.add_field(name="📨 `!send`", value="A fix Foxpost adatlap elküldése privát üzenetben.", inline=False)
+    embed.set_footer(text="BOT • Parancslista")
+    return embed
+
+@bot.command(name="p")
+async def p(ctx):
+    ok, msg = check_access(ctx=ctx)
+    if not ok:
+        return await ctx.send(msg)
+    await ctx.send(embed=build_command_embed(), view=CommandPanelView())
 
 # ---------- AUTO MONEY / TIME ----------
 import re
