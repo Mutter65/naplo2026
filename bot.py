@@ -1020,6 +1020,55 @@ async def vbuck(ctx):
     )
 
 
+# ---------- SEND / FOXPOST ----------
+FOXPOST_NAME = "Jurák István"
+FOXPOST_EMAIL = "chuck300@freemail.hu"
+FOXPOST_MOBILE = "+36205975111"
+FOXPOST_LOCKER = "Mohács, Tompa Mihály u. 15, 7700"
+FOXPOST_MAP_URL = "https://maps.google.com/maps?hl=en&gl=hu&um=1&ie=UTF-8&fb=1&sa=X&ftid=0x4742d1b1f087a9ef:0x23f74ca75badeafd"
+
+
+def build_send_panel():
+    embed = discord.Embed(
+        title="📦 FOXPOST ADATOK",
+        description="**A csomagküldéshez szükséges adatok:**",
+        color=discord.Color.red()
+    )
+
+    embed.add_field(
+        name="👤 Név",
+        value=FOXPOST_NAME,
+        inline=False
+    )
+    embed.add_field(
+        name="📧 Email",
+        value=FOXPOST_EMAIL,
+        inline=False
+    )
+    embed.add_field(
+        name="📱 Mobil",
+        value=FOXPOST_MOBILE,
+        inline=False
+    )
+    embed.add_field(
+        name="📦 Foxpost automata",
+        value=f"[{FOXPOST_LOCKER}]({FOXPOST_MAP_URL})",
+        inline=False
+    )
+
+    embed.set_footer(text="FOXPOST • Szállítási adatok")
+    return embed
+
+
+@bot.command(name="send")
+async def send(ctx):
+    ok, msg = check_access(ctx=ctx)
+    if not ok:
+        return await ctx.send(msg)
+
+    await ctx.send(embed=build_send_panel())
+
+
 # ---------- COMMAND ----------
 @bot.command()
 async def n(ctx):
