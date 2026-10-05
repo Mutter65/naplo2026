@@ -1119,6 +1119,31 @@ async def foxpost(ctx):
     await ctx.send(embed=embed, view=FoxpostView())
 
 
+# ---------- SEND / FOXPOST ADATLAP ----------
+@bot.command(name="send")
+async def send(ctx):
+    ok, msg = check_access(ctx=ctx)
+    if not ok:
+        return await ctx.send(msg)
+
+    embed = discord.Embed(
+        title="📦 FOXPOST ADATLAP",
+        description="**Szállítási adatok**",
+        color=discord.Color.orange(),
+    )
+    embed.add_field(name="👤 Név", value="Jurák István", inline=False)
+    embed.add_field(name="📧 Email", value="chuck300@freemail.hu", inline=False)
+    embed.add_field(name="📱 Mobil", value="+36205975111", inline=False)
+    embed.add_field(
+        name="📦 Foxpost automata",
+        value="[Mohács, Tompa Mihály u. 15, 7700](https://maps.google.com/maps?hl=en&gl=hu&um=1&ie=UTF-8&fb=1&sa=X&ftid=0x4742d1b1f087a9ef:0x23f74ca75badeafd)",
+        inline=False,
+    )
+    embed.set_footer(text="FOXPOST • !send")
+
+    await ctx.send(embed=embed)
+
+
 # ---------- COMMAND ----------
 @bot.command()
 async def n(ctx):
