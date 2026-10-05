@@ -1020,53 +1020,103 @@ async def vbuck(ctx):
     )
 
 
-# ---------- SEND / FOXPOST ----------
-FOXPOST_NAME = "Jurák István"
-FOXPOST_EMAIL = "chuck300@freemail.hu"
-FOXPOST_MOBILE = "+36205975111"
-FOXPOST_LOCKER = "Mohács, Tompa Mihály u. 15, 7700"
-FOXPOST_MAP_URL = "https://maps.google.com/maps?hl=en&gl=hu&um=1&ie=UTF-8&fb=1&sa=X&ftid=0x4742d1b1f087a9ef:0x23f74ca75badeafd"
+# ---------- FOXPOST ----------
+FOXPOST_RECIPIENT_ID = 419451608485593089
 
 
-def build_send_panel():
-    embed = discord.Embed(
-        title="📦 FOXPOST ADATOK",
-        description="**A csomagküldéshez szükséges adatok:**",
-        color=discord.Color.red()
+class FoxpostModal(discord.ui.Modal, title="Foxpost adatok"):
+    nev = discord.ui.TextInput(
+        label="Név:",
+        placeholder="Írd be a nevet",
+        required=True,
+        max_length=100,
+    )
+    email = discord.ui.TextInput(
+        label="Email:",
+        placeholder="Írd be az email címet",
+        required=True,
+        max_length=150,
+    )
+    mobil = discord.ui.TextInput(
+        label="Mobil:",
+        placeholder="Pl. +36201234567",
+        required=True,
+        max_length=30,
+    )
+    foxpost_automata = discord.ui.TextInput(
+        label="Foxpost automata:",
+        placeholder="Pl. Mohács, Tompa Mihály u. 15, 7700",
+        required=True,
+        style=discord.TextStyle.paragraph,
+        max_length=300,
     )
 
-    embed.add_field(
-        name="👤 Név",
-        value=FOXPOST_NAME,
-        inline=False
-    )
-    embed.add_field(
-        name="📧 Email",
-        value=FOXPOST_EMAIL,
-        inline=False
-    )
-    embed.add_field(
-        name="📱 Mobil",
-        value=FOXPOST_MOBILE,
-        inline=False
-    )
-    embed.add_field(
-        name="📦 Foxpost automata",
-        value=f"[{FOXPOST_LOCKER}]({FOXPOST_MAP_URL})",
-        inline=False
-    )
+    async def on_submit(self, interaction: discord.Interaction):
+        ok, msg = check_access(interaction=interaction)
+        if not ok:
+            return await interaction.response.send_message(msg, ephemeral=True)
 
-    embed.set_footer(text="FOXPOST • Szállítási adatok")
-    return embed
+        sender = interaction.user
+        sender_text = f"{sender.mention} ({sender.display_name})\nID: `{sender.id}`"
+
+        embed = discord.Embed(
+            title="📦 FOXPOST ADATOK",
+            description="**Beküldött Foxpost adatok**",
+            color=discord.Color.orange(),
+        )
+        embed.add_field(name="👤 Név", value=str(self.nev.value), inline=False)
+        embed.add_field(name="📧 Email", value=str(self.email.value), inline=False)
+        embed.add_field(name="📱 Mobil", value=str(self.mobil.value), inline=False)
+        embed.add_field(name="📦 Foxpost automata", value=str(self.foxpost_automata.value), inline=False)
+        embed.add_field(name="📨 Küldte", value=sender_text, inline=False)
+        embed.set_footer(text="FOXPOST • Beküldött adatok")
+
+        # A beküldő csatornában csak ő látja az adatokat.
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+        # Ugyanezt az adatlapot privát üzenetben is megkapja a megadott Discord-felhasználó.
+        try:
+            recipient = bot.get_user(FOXPOST_RECIPIENT_ID)
+            if recipient is None:
+                recipient = await bot.fetch_user(FOXPOST_RECIPIENT_ID)
+            await recipient.send(embed=embed)
+        except discord.Forbidden:
+            # A csatornában már megjelent az adatlap; a DM sikertelenségét nem engedjük a botnak leállítani.
+            print(f"❌ Nem sikerült privát üzenetet küldeni a(z) {FOXPOST_RECIPIENT_ID} felhasználónak.", flush=True)
+        except Exception as e:
+            print(f"❌ Foxpost DM hiba: {type(e).__name__}: {e}", flush=True)
 
 
-@bot.command(name="send")
-async def send(ctx):
+@bot.command(name="foxpost")
+async def foxpost(ctx):
     ok, msg = check_access(ctx=ctx)
     if not ok:
         return await ctx.send(msg)
 
-    await ctx.send(embed=build_send_panel())
+    embed = discord.Embed(
+        title="📦 FOXPOST",
+        description=(
+            "**Töltsd ki a Foxpost adataidat az alábbi űrlapon.**\n\n"
+            "A beküldés után az adatlapot csak te fogod látni ebben a csatornában, "
+            "és a megadott címzett privát üzenetben is megkapja."
+        ),
+        color=discord.Color.orange(),
+    )
+    embed.add_field(name="📝 Szükséges adatok", value="Név\nEmail\nMobil\nFoxpost automata", inline=False)
+    embed.set_footer(text="FOXPOST • Nyomd meg az űrlap megnyitásához")
+
+    class FoxpostView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=300)
+
+        @discord.ui.button(label="Foxpost adatok kitöltése", emoji="📦", style=discord.ButtonStyle.primary)
+        async def open_form(self, interaction: discord.Interaction, button: discord.ui.Button):
+            ok, msg = check_access(interaction=interaction)
+            if not ok:
+                return await interaction.response.send_message(msg, ephemeral=True)
+            await interaction.response.send_modal(FoxpostModal())
+
+    await ctx.send(embed=embed, view=FoxpostView())
 
 
 # ---------- COMMAND ----------
