@@ -604,44 +604,37 @@ def build_spar_dm_panel():
 
 
 # ---------- BOLT / NYITVATARTÁS ----------
-# A megadott MOHÁCS-i táblázat zárási időket tartalmaz.
-# Ezért a bot az adott napi zárási időig NYITVA, utána ZÁRVA állapotot jelez.
-# Ahol a táblázatban nincs vasárnapi adat, ott vasárnap ZÁRVA jelenik meg.
+# Nyitási és zárási időkkel, naponta külön kezelve.
+# A zöld jelzés KIZÁRÓLAG akkor jelenik meg, amikor az üzlet ténylegesen nyitva van.
 
 BOLTOK = {
     "MOHÁCS": [
-        {"nev": "ALDI", "hetkoznap": "20:00", "szombat": "20:00", "vasarnap": "19:00"},
-        {"nev": "LIDL", "hetkoznap": "21:00", "szombat": "21:00", "vasarnap": "19:00"},
-        {"nev": "TESCO", "hetkoznap": "21:00", "szombat": "21:00", "vasarnap": "19:00"},
-        {"nev": "PENNY", "hetkoznap": "20:00", "szombat": "20:00", "vasarnap": "18:00"},
-        {"nev": "SPAR", "hetkoznap": "20:00", "szombat": "17:00", "vasarnap": "13:00"},
-        {"nev": "FORZA", "hetkoznap": "20:00", "szombat": "20:00", "vasarnap": "13:00"},
-        {"nev": "ARANY FORZA", "hetkoznap": "19:00", "szombat": "19:00", "vasarnap": "13:00"},
-        {"nev": "MINI FORZA", "hetkoznap": "19:00", "szombat": "13:00", "vasarnap": None},
-        {"nev": "JYSK", "hetkoznap": "18:00", "szombat": "18:00", "vasarnap": "16:00"},
-        {"nev": "DIEGO", "hetkoznap": "17:00", "szombat": "13:00", "vasarnap": None},
-        {"nev": "ROSSMANN", "hetkoznap": "18:00", "szombat": "13:00", "vasarnap": None},
-        {"nev": "DM", "hetkoznap": "20:00", "szombat": "20:00", "vasarnap": "17:00"},
-        {"nev": "EURONICS", "hetkoznap": "18:00", "szombat": "13:00", "vasarnap": None},
-        {"nev": "PEPCO", "hetkoznap": "19:00", "szombat": "19:00", "vasarnap": "17:00"},
-        {"nev": "TEDDY", "hetkoznap": "20:00", "szombat": "20:00", "vasarnap": "18:00"},
-        {"nev": "ECHO FAMILY", "hetkoznap": "20:00", "szombat": "20:00", "vasarnap": "18:00"},
-        {"nev": "KIK", "hetkoznap": "20:00", "szombat": "20:00", "vasarnap": "18:00"},
+        {"nev": "ALDI", "hetkoznap": ("07:00", "20:00"), "szombat": ("07:00", "20:00"), "vasarnap": ("07:00", "19:00")},
+        {"nev": "LIDL", "hetkoznap": ("07:00", "21:00"), "szombat": ("07:00", "21:00"), "vasarnap": ("07:00", "19:00")},
+        {"nev": "TESCO", "hetkoznap": ("06:00", "21:00"), "szombat": ("06:00", "21:00"), "vasarnap": ("07:00", "19:00")},
+        {"nev": "PENNY", "hetkoznap": ("06:00", "20:00"), "szombat": ("06:00", "20:00"), "vasarnap": ("07:00", "18:00")},
+        {"nev": "SPAR", "hetkoznap": ("06:30", "20:00"), "szombat": ("06:30", "17:00"), "vasarnap": ("07:00", "13:00")},
+        {"nev": "FORZA", "hetkoznap": ("06:00", "20:00"), "szombat": ("06:00", "20:00"), "vasarnap": ("07:00", "20:00")},
+        {"nev": "ARANY FORZA", "hetkoznap": ("05:00", "19:00"), "szombat": ("05:00", "19:00"), "vasarnap": ("05:00", "13:00")},
+        {"nev": "MINI FORZA", "hetkoznap": ("05:00", "19:00"), "szombat": ("05:00", "13:00"), "vasarnap": None},
+        {"nev": "JYSK", "hetkoznap": ("09:00", "18:00"), "szombat": ("09:00", "18:00"), "vasarnap": ("09:00", "16:00")},
+        {"nev": "DIEGO", "hetkoznap": ("09:00", "17:00"), "szombat": ("09:00", "13:00"), "vasarnap": None},
+        {"nev": "ROSSMANN", "hetkoznap": ("08:00", "18:00"), "szombat": ("08:00", "13:00"), "vasarnap": None},
+        {"nev": "DM", "hetkoznap": ("08:00", "20:00"), "szombat": ("08:00", "20:00"), "vasarnap": ("09:00", "17:00")},
+        {"nev": "EURONICS", "hetkoznap": ("09:00", "18:00"), "szombat": ("09:00", "13:00"), "vasarnap": None},
+        {"nev": "PEPCO", "hetkoznap": ("09:00", "19:00"), "szombat": ("09:00", "19:00"), "vasarnap": ("09:00", "17:00")},
+        {"nev": "TEDI", "hetkoznap": ("09:00", "20:00"), "szombat": ("09:00", "20:00"), "vasarnap": ("09:00", "18:00")},
+        {"nev": "ECOFAMILY", "hetkoznap": ("09:00", "20:00"), "szombat": ("09:00", "20:00"), "vasarnap": ("09:00", "18:00")},
+        {"nev": "KIK", "hetkoznap": ("09:00", "20:00"), "szombat": ("09:00", "19:00"), "vasarnap": ("09:00", "17:00")},
     ],
     "PÉCS": [
-        # A PÉCS-i táblázat még nincs megadva.
+        # A PÉCS-i üzletekhez még nincs feltöltve nyitvatartási adat.
     ],
 }
 
 
-def parse_bolt_time(value):
-    """HH:MM formátumú időből perceket készít."""
-    hour, minute = map(int, value.split(":"))
-    return hour * 60 + minute
-
-
-def get_bolt_closing(shop, now):
-    """Visszaadja az adott naphoz tartozó zárási időt."""
+def get_bolt_hours(shop, now):
+    """Visszaadja az adott nap nyitási és zárási idejét."""
     weekday = now.weekday()
 
     if weekday < 5:
@@ -655,24 +648,22 @@ def get_bolt_closing(shop, now):
 
 
 def get_bolt_status(shop):
-    """
-    Megállapítja az üzlet állapotát a megadott zárási idő alapján.
-    A táblázat csak zárási időket tartalmaz, nyitási időket nem.
-    """
+    """Megállapítja, hogy az üzlet jelenleg nyitva van-e."""
     now = datetime.now(ZoneInfo("Europe/Budapest"))
-    closing = get_bolt_closing(shop, now)
+    hours = get_bolt_hours(shop, now)
 
-    # Ha az adott naphoz nincs adat, akkor zárva.
-    if not closing:
-        return False, None
+    # Az adott napon zárva van.
+    if not hours:
+        return False, None, None
 
+    opening, closing = hours
     current_minutes = now.hour * 60 + now.minute
+    opening_minutes = parse_bolt_time(opening)
     closing_minutes = parse_bolt_time(closing)
 
-    # A zárási idő pillanatában már zárva.
-    is_open = current_minutes < closing_minutes
+    is_open = opening_minutes <= current_minutes < closing_minutes
 
-    return is_open, closing
+    return is_open, opening, closing
 
 
 def build_bolt_embed(varos):
@@ -696,20 +687,22 @@ def build_bolt_embed(varos):
 
     for shop in shops:
         nev = str(shop.get("nev", "ISMERETLEN ÜZLET")).upper()
-        is_open, closing = get_bolt_status(shop)
+        is_open, opening, closing = get_bolt_status(shop)
 
         if is_open:
-            # ZÖLD jelzés = jelenleg nyitva
+            # ZÖLD jelzés kizárólag a tényleges nyitvatartási idő alatt.
             lines.append(
-                f"🟩 **{nev}** — **NYITVA** — még **{closing}-ig**"
+                f"🟩 **{nev}** — **NYITVA** — **{opening}–{closing}**"
+            )
+        elif opening and closing:
+            lines.append(
+                f"🟥 **{nev}** — **ZÁRVA** — **{opening}–{closing}**"
             )
         else:
-            # PIROS jelzés = jelenleg zárva
             lines.append(
-                f"🟥 **{nev}** — **ZÁRVA**"
+                f"🟥 **{nev}** — **ZÁRVA** — ma nincs nyitva"
             )
 
-    # MINDEN ÜZLET KIÍRÁSA EGYETLEN LISTÁBAN
     embed.description = "\n".join(lines)
     embed.set_footer(
         text="🟩 NYITVA  •  🟥 ZÁRVA  •  Magyar idő (Europe/Budapest)"
@@ -1141,7 +1134,20 @@ async def send(ctx):
     )
     embed.set_footer(text="FOXPOST • !send")
 
-    await ctx.send(embed=embed)
+    # A panelt nem a Discord szobába küldjük, hanem annak a felhasználónak DM-ben,
+    # aki kiadta a !send parancsot.
+    try:
+        await ctx.author.send(embed=embed)
+        # A csatornában csak egy rövid, látható visszajelzés jelenik meg.
+        await ctx.send(f"✅ {ctx.author.mention} a Foxpost panelt privát üzenetben elküldtem neked.")
+    except discord.Forbidden:
+        await ctx.send(
+            f"❌ {ctx.author.mention} nem tudok privát üzenetet küldeni neked. "
+            "Ellenőrizd, hogy engedélyezve vannak-e a szerver tagjaitól érkező privát üzenetek."
+        )
+    except Exception as e:
+        print(f"❌ !send DM hiba: {type(e).__name__}: {e}", flush=True)
+        await ctx.send(f"❌ Nem sikerült privát üzenetben elküldeni a panelt: {type(e).__name__}")
 
 
 # ---------- COMMAND ----------
