@@ -1129,7 +1129,7 @@ async def send(ctx):
     embed.add_field(name="📱 Mobil", value="+36205975111", inline=False)
     embed.add_field(
         name="📦 Foxpost automata",
-        value="[Mohács, Tompa Mihály u. 15, 7700](https://maps.google.com/maps?hl=en&gl=hu&um=1&ie=UTF-8&fb=1&sa=X&ftid=0x4742d1b1f087a9ef:0x23f74ca75badeafd)",
+        value="[FOXPOST A-BOX Mohács Kyra Center]()",
         inline=False,
     )
     embed.set_footer(text="FOXPOST • !send")
