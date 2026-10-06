@@ -1129,7 +1129,7 @@ async def send(ctx):
     embed.add_field(name="📱 Mobil", value="+36205975111", inline=False)
     embed.add_field(
         name="📦 Foxpost automata",
-        value="[FOXPOST A-BOX Mohács Kyra Center]()",
+        value="[FOXPOST A-BOX Mohács Kyra Center](https://www.google.com/search?q=FOXPOST+A-BOX+Moh%C3%A1cs+Kyra+Center&client=ms-android-honor&hs=MMlq&sca_esv=b44634d0b9d75b78&sxsrf=APpeQnsEn3To9kF_vg6ig34NL6JCKjdwKw%3A1791271794090&ei=cqPEariNBe2Nxc8PlsSWoQM&biw=360&bih=711&oq=FOXPOST+A-BOX+Moh%C3%A1cs+Kyra+Center&gs_lp=EhNtb2JpbGUtZ3dzLXdpei1zZXJwIiFGT1hQT1NUIEEtQk9YIE1vaMOhY3MgS3lyYSBDZW50ZXIyBRAhGKABMgUQIRigATIFEAAY7wUyBRAAGO8FMgUQABjvBTIIEAAYgAQYogRIyjNQ9wxYqShwAngBkAECmAGxAqABygeqAQcwLjMuMS4xuAEMyAEA-AEB-AECmAIFoAL5BagCLcICChAAGEcY1gQYsAPCAg0QABhHGNYEGMkDGLADwgIOEAAYgAQYigUYkgMYsAPCAgQQIxgnwgIGEAAYFhgewgIIEAAYgAQYsQPCAgUQABiABMICCxAAGIAEGLEDGIMBwgIHECMY6gIYJ8ICDRAuGMcBGK8BGOoCGCfCAg0QIxjJAhjwBRjqAhgnwgINECMY8AUYyQIY6gIYJ8ICBxAuGOoCGCfCAhAQABgDGI8BGOoCGLQC2AEBwgIQEC4YAxiPARjqAhi0AtgBAZgDJfEFm3AT4VMUtU-IBgGQBgm6BgQIARgKkgcHMi4xLjEuMaAHqRmyBwcwLjEuMS4xuAe9BcIHBzItMi4xLjLIB1GACAE&sclient=mobile-gws-wiz-serp)",
         inline=False,
     )
     embed.set_footer(text="FOXPOST • !send")
